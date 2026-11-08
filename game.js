@@ -433,22 +433,111 @@ if(window.visualViewport){
 /* ---------------- level load ---------------- */
 function loadLevel(i){
   S.level=i;
+  /* =========================================================
+     ONE DETERMINISTIC STREAM PER LEVEL
+     ---------------------------------------------------------
+     Everything in this function that used to reach for
+     Math.random() — flame phases, blade phases, the bob offset of
+     every gem and flask, even the ambient motes — now comes from a
+     seeded PRNG. The point is not decoration: a flame's phase
+     decides WHICH MOMENTS IT IS LETHAL, so a random phase meant the
+     same fire could be safe on one attempt and fatal on the next.
+     Same level, same seed, same rhythm, every single run.
+     ========================================================= */
+  const lrnd = (typeof seedRand === 'function')
+    ? seedRand((((i+1) * 2654435761) ^ 0x51ed2701) >>> 0)
+    : Math.random;
   const L=LEVELS[i], W=WORLDS.filter(w=>w.id===L.w)[0]||WORLDS[0];
   cur={ L:L, W:W, plats:[], movers:[], ceils:[], crumbs:[], gems:[], oils:[],
-        spikes:[], fires:[], lavas:[], checkpoints:[], goal:null };
+        spikes:[], fires:[], lavas:[], checkpoints:[], goal:null,
+        /* ---- new hazard families ---- */
+        saws:[], nails:[], risers:[], crushers:[] };
+
   (L.plats||[]).forEach(p=>cur.plats.push({x:p[0],y:p[1],w:p[2],h:p[3]}));
   (L.ceils||[]).forEach(p=>cur.ceils.push({x:p[0],y:p[1],w:p[2],h:p[3]}));
-  /* fragile platforms: crumble after the player stands on them */
+
+  /* =========================================================
+     FRAGILE PLATFORMS
+     ---------------------------------------------------------
+     The fuse used to be a constant 0.55s baked into `update`.
+     It is now authored per platform (levels.js clamps it to
+     TUNE.FUSE_MIN) and carried here as `fuse`. `respawn` decides
+     whether the platform comes back after it falls — a chain
+     that half-returns can never be memorised as a fixed shape.
+
+     crumbs: [x, y, w, h, fuse, respawn]
+     ========================================================= */
   (L.crumbs||[]).forEach(p=>cur.crumbs.push({
-    x:p[0],y:p[1],w:p[2],h:p[3],alive:true,timer:0,shake:0
+    x:p[0], y:p[1], w:p[2], h:p[3],
+    alive:true, timer:0, shake:0,
+    fuse: p[4] || 0.55,
+    respawn: p[5] === 1,
+    cool: 0
+  }));
+
+  /* =========================================================
+     SAWS — a spinning blade on a patrol path.
+     `axis` is 'x' (slides), 'y' (bobs) or 'c' (orbits).
+     The blade's live centre is (x, y); the patrol is evaluated
+     every frame in `update` from `baseX/baseY`.
+     ========================================================= */
+  (L.saws||[]).forEach(s=>cur.saws.push({
+    baseX:s.x, baseY:s.y, x:s.x, y:s.y, r:s.r || 26,
+    axis:s.axis || 'x', dist:s.dist || 110, speed:s.speed || 1.3,
+    phase:s.phase || lrnd()*6.2832,
+    spin:0
+  }));
+
+  /* NAILS — [x, y, w, h, dir]  dir = 1 floor, -1 ceiling */
+  (L.nails||[]).forEach(n=>cur.nails.push({
+    x:n[0], y:n[1], w:n[2], h:n[3], dir:n[4] === -1 ? -1 : 1
+  }));
+
+  /* =========================================================
+     RISERS — a stone that erupts out of the floor.
+     Authored at its RAISED position. It starts buried (`rise`
+     at 0 = fully sunk) and animates up when the player is near,
+     then crumbles `fuse` seconds after being stood on.
+
+     risers: [x, y, w, h, fuse, respawn]
+     ========================================================= */
+  (L.risers||[]).forEach(r=>cur.risers.push({
+    x:r[0], y:r[1], w:r[2], h:r[3],
+    fuse: r[4] || 0.6,
+    respawn: r[5] === 1,
+    rise: 0,            /* 0 = buried, 1 = fully up   */
+    state:'idle',       /* idle | up | dying | gone   */
+    timer:0, shake:0, cool:0
+  }));
+
+  /* =========================================================
+     CRUSHERS — a stone that drops from the ceiling.
+     Authored at its RAISED position; `y` is the live top, which
+     travels down by `drop` when the player walks underneath.
+
+     crushers: [x, y, w, h, drop, speed]
+     ========================================================= */
+  (L.crushers||[]).forEach(c=>cur.crushers.push({
+    x:c[0], y:c[1], baseY:c[1], w:c[2], h:c[3],
+    drop:c[4] || 150, speed:c[5] || 1.9,
+    t:0,            /* 0 = raised, 1 = fully dropped */
+    state:'idle',   /* idle | falling | held | rising */
+    hold:0
   }));
   /* fires: [x, y, w] — flames that flicker on and off */
   (L.fires||[]).forEach(f=>cur.fires.push({
     x:f[0],y:f[1],w:f[2],h:f[3]||34,
-    on:true,ph:Math.random()*6,speed:f[4]||1.6
+    on:true,
+    /* the phase decides WHEN the flame is deadly, so it is derived from
+       the flame's own fixed position rather than thrown at random */
+    ph:((f[0]*0.0173) % 6.2832),
+    speed:f[4]||1.6
   }));
-  /* lava: [x, y, w, h] — deadly pool, always on */
-  (L.lavas||[]).forEach(l=>cur.lavas.push({x:l[0],y:l[1],w:l[2],h:l[3]||60}));
+  /* lava: [x, y, w, h, groundY] — a pit cut into the floor, always on */
+  (L.lavas||[]).forEach(l=>cur.lavas.push({
+    x:l[0], y:l[1], w:l[2], h:l[3]||60,
+    gy: l[4] !== undefined ? l[4] : 500
+  }));
   /* Checkpoints are authored with their y already sitting on a real
      surface. We still verify it here: a checkpoint that has no solid
      ground beneath it is DROPPED rather than left floating — a floating
@@ -473,14 +562,20 @@ function loadLevel(i){
       if(cx>=cr.x-16 && cx<=cr.x+cr.w+16 && Math.abs(cr.y-bestY)<18) return;
     }
     /* sit 30px above the platform surface — the flag pole is 14px tall */
-    cur.checkpoints.push({x:cx, y:bestY-30, reached:false, ph:Math.random()*6});
+    cur.checkpoints.push({x:cx, y:bestY-30, reached:false, ph:lrnd()*6});
   });
   (L.movers||[]).forEach(m=>cur.movers.push({
     baseX:m.x,baseY:m.y,x:m.x,y:m.y,w:m.w,h:m.h,
     axis:m.axis||'x',dist:m.dist||0,speed:m.speed||1,phase:m.phase||0,dx:0,dy:0
   }));
-  (L.gems||[]).forEach(g=>cur.gems.push({x:g[0],y:g[1],got:false,ph:Math.random()*6}));
-  (L.oil||[]).forEach(o=>cur.oils.push({x:o[0],y:o[1],got:false,ph:Math.random()*6}));
+  /* the bob offset of every gem comes from its own fixed position, so a
+     pickup never shimmers on a different beat from one run to the next */
+  (L.gems||[]).forEach(g=>cur.gems.push({
+    x:g[0], y:g[1], got:false, ph:((g[0]*0.021) % 6.2832)
+  }));
+  (L.oil||[]).forEach(o=>cur.oils.push({
+    x:o[0], y:o[1], got:false, ph:((o[0]*0.017) % 6.2832)
+  }));
   (L.spikes||[]).forEach(s=>cur.spikes.push({x:s[0],y:s[1],w:s[2],h:22}));
   cur.goal={x:L.goal[0],y:L.goal[1],w:44,h:70};
 
@@ -491,12 +586,13 @@ function loadLevel(i){
   S.tutMoved=false; S.tutJumped=false; S.tutDouble=false; S.tutGem=false; S.tutOil=false;
   S.motes=[];
   for(let k=0;k<52;k++){
-    S.motes.push({x:rnd(0,L.wd), y:rnd(0,VIEW_H), r:rnd(.8,2.6), sp:rnd(4,16), ph:rnd(0,7)});
+    S.motes.push({x:lrnd()*L.wd, y:lrnd()*VIEW_H, r:.8+lrnd()*1.8,
+                  sp:4+lrnd()*12, ph:lrnd()*7});
   }
   S.stars=[];
   for(let k=0;k<80;k++) S.stars.push({
-    x:rnd(0,L.wd), y:rnd(0,VIEW_H*.75),
-    r:rnd(.5,1.6), a:rnd(.35,.95), ph:rnd(0,6.2832)
+    x:lrnd()*L.wd, y:lrnd()*VIEW_H*.75,
+    r:.5+lrnd()*1.1, a:.35+lrnd()*.6, ph:lrnd()*6.2832
   });
 
   P.w=26; P.h=34;
@@ -519,12 +615,38 @@ function hit(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b
 
 function solids(){
   const arr=cur.plats.slice();
-  for(let i=0;i<cur.movers.length;i++) arr.push(cur.movers[i]);
-  for(let i=0;i<cur.ceils.length;i++) arr.push(cur.ceils[i]);
+  for(let i=0;i<cur.movers.length;i++){ if(cur.movers[i]) arr.push(cur.movers[i]); }
+  for(let i=0;i<cur.ceils.length;i++){ if(cur.ceils[i]) arr.push(cur.ceils[i]); }
   /* fragile platforms only count while they haven't crumbled */
   if(cur.crumbs){
     for(let i=0;i<cur.crumbs.length;i++){
       if(cur.crumbs[i].alive) arr.push(cur.crumbs[i]);
+    }
+  }
+  /* =========================================================
+     RISERS — solid as soon as the stone is standing.
+     ---------------------------------------------------------
+     THE BUG THIS FIXES
+     ------------------
+     The old rule was `state==='up' && rise > 0.55`. That meant a
+     stone which had finished climbing but was still settling, or
+     one that had been nudged back below 0.55 by the idle sink,
+     was NOT solid — so the player landed on it and fell straight
+     through. From the player's side that is "the rock you cannot
+     stand on", and it is indefensible: a stone that is visibly
+     there must hold you.
+
+     A riser is now solid whenever it is up OR when it is still
+     climbing past the point where its top is within reach
+     (rise > 0.35). It stops being solid the moment it starts to
+     give way, which is the only moment that matters.
+     ========================================================= */
+  if(cur.risers){
+    for(let i=0;i<cur.risers.length;i++){
+      const r=cur.risers[i];
+      if(!r) continue;
+      if(r.state==='gone' || r.state==='dying') continue;
+      if(r.rise > 0.35) arr.push(r);
     }
   }
   return arr;
@@ -729,46 +851,280 @@ function update(dt){
   /* fall out */
   if(P.y > VIEW_H+140){ loseHeart(); return; }
 
-  /* spikes */
+  /* =========================================================
+     PLAYER HITBOX — declared ONCE, at the top of the hazard pass.
+     ---------------------------------------------------------
+     `pb` used to be declared here, immediately before the spikes
+     loop, and the saw block far below referenced it. That worked
+     only because nothing between them returned early. The moment
+     a hazard could bail out of `update()` before the declaration
+     ran, every later reference to `pb.w` threw
+
+         TypeError: Cannot read properties of undefined (reading 'w')
+
+     Moving the declaration up — before ANY hazard can return —
+     removes the whole class of bug, not just the one instance.
+     ========================================================= */
   const pb={x:P.x+4,y:P.y+4,w:P.w-8,h:P.h-8};
+
+  /* every hazard array is guaranteed to exist before it is walked */
+  if(!cur.spikes) cur.spikes=[];
+  if(!cur.fires)  cur.fires=[];
+  if(!cur.lavas)  cur.lavas=[];
+  if(!cur.crumbs) cur.crumbs=[];
+  if(!cur.saws)   cur.saws=[];
+  if(!cur.nails)  cur.nails=[];
+  if(!cur.risers) cur.risers=[];
+  if(!cur.crushers) cur.crushers=[];
+
+  /* spikes */
   for(let i=0;i<cur.spikes.length;i++){
-    if(hit(pb,cur.spikes[i])){ loseHeart(); return; }
+    const sp=cur.spikes[i];
+    if(!sp) continue;
+    if(hit(pb,sp)){ loseHeart(); return; }
   }
 
   /* fires — flames pulse on and off, so timing matters */
-  if(!cur.fires) cur.fires=[];
   for(let i=0;i<cur.fires.length;i++){
     const f=cur.fires[i];
+    if(!f) continue;
     const wave=Math.sin(S.t*f.speed+f.ph);
     f.on = wave > -0.15;                 /* on ~57% of the cycle */
     if(f.on && hit(pb,f)){ loseHeart(); return; }
   }
 
   /* lava — always lethal, never flickers */
-  if(!cur.lavas) cur.lavas=[];
   for(let i=0;i<cur.lavas.length;i++){
-    if(hit(pb,cur.lavas[i])){ loseHeart(); return; }
+    const lv=cur.lavas[i];
+    if(!lv) continue;
+    if(hit(pb,lv)){ loseHeart(); return; }
   }
 
-  /* fragile platforms — start a countdown when stood on, then vanish */
-  if(!cur.crumbs) cur.crumbs=[];
+  /* =========================================================
+     FRAGILE PLATFORMS
+     ---------------------------------------------------------
+     Two changes from the original loop:
+
+       1. The fuse is read from the platform (`c.fuse`) instead
+          of being the constant 0.55.
+       2. A platform with `respawn` comes back after a cooldown,
+          which is what makes a chain genuinely unpredictable:
+          the player cannot assume "that one is gone for good".
+
+     The cooldown is deliberately longer than the longest fuse so
+     a returning platform never pops up underneath a player who
+     is still mid-jump over it.
+     ========================================================= */
   for(let i=0;i<cur.crumbs.length;i++){
     const c=cur.crumbs[i];
-    if(!c.alive) continue;
+    if(!c) continue;
+
+    /* ---- dead: wait out the cooldown, then come back ---- */
+    if(!c.alive){
+      if(c.respawn){
+        c.cool -= dt;
+        if(c.cool <= 0){
+          c.alive = true; c.timer = 0; c.shake = 0;
+          burst(c.x+c.w/2, c.y+c.h/2, cur.W.accent2, 8);
+          AU.tone(520,.08,'sine',.04);
+        }
+      }
+      continue;
+    }
+
     const standing = P.onGround && P.y+P.h >= c.y-4 && P.y+P.h <= c.y+8 &&
                      P.x+P.w > c.x && P.x < c.x+c.w;
     if(standing){
-      if(c.timer===0){ c.timer=0.55; AU.tone(180,.10,'square',.05); }
+      if(c.timer===0){
+        c.timer = c.fuse || 0.55;
+        AU.tone(180,.10,'square',.05);
+      }
       c.timer -= dt;
       c.shake = Math.min(3, c.shake + dt*14);
       if(c.timer<=0){
         c.alive=false;
+        c.timer=0;
+        c.cool = 2.6;
         burst(c.x+c.w/2, c.y+c.h/2, cur.W.platTop, 14);
         AU.tone(120,.22,'sawtooth',.07,50);
       }
     } else {
       c.shake = Math.max(0, c.shake - dt*10);
     }
+  }
+
+  /* =========================================================
+     SAWS — a spinning blade on a patrol path.
+     ---------------------------------------------------------
+     The blade's centre is a pure function of `S.t`, so it is
+     perfectly deterministic and perfectly readable: the player
+     can learn the rhythm of a blade and beat it with skill.
+
+     Collision is a CIRCLE test against the player's box, which
+     is the honest shape for a spinning disc — a box test would
+     kill a player who is visibly clear of the teeth.
+     ========================================================= */
+  for(let i=0;i<cur.saws.length;i++){
+    const s=cur.saws[i];
+    if(!s) continue;
+    const off = Math.sin(S.t * s.speed + s.phase) * s.dist;
+    if(s.axis === 'x'){ s.x = s.baseX + off; s.y = s.baseY; }
+    else if(s.axis === 'y'){ s.x = s.baseX; s.y = s.baseY + off; }
+    else {
+      /* circular orbit — the hardest to read, late-game only */
+      s.x = s.baseX + Math.cos(S.t * s.speed + s.phase) * s.dist;
+      s.y = s.baseY + Math.sin(S.t * s.speed + s.phase) * s.dist;
+    }
+    s.spin += dt * 7.5;
+
+    /* =========================================================
+       CIRCLE vs BOX — and the blade now actually bites.
+       ---------------------------------------------------------
+       THE BUG THIS FIXES
+       ------------------
+       The old test used `s.r * 0.86` as the collision radius. A
+       blade of radius 26 therefore only reached 22.4 units — and
+       because the test measures from the blade's CENTRE to the
+       nearest point of the player box, a spirit walking straight
+       through the middle of the blade could clear it whenever its
+       box happened to be narrow at that instant.
+
+       Worse, the player box is already inset by 4 on each side
+       (`pb`), so the effective reach was 22.4 + 4 = 26.4 against a
+       drawn blade of 26 plus teeth. The teeth were, in practice,
+       decoration: the drawn blade was bigger than the thing that
+       could hurt you.
+
+       Now the radius is the FULL drawn radius plus a small bite,
+       so if the teeth are visibly touching the spirit, the spirit
+       dies. That is what the player expects, and it is what the
+       artwork has been promising all along.
+       ========================================================= */
+    const nx = clamp(s.x, pb.x, pb.x+pb.w);
+    const ny = clamp(s.y, pb.y, pb.y+pb.h);
+    const ddx = s.x - nx, ddy = s.y - ny;
+    const hitR = s.r + 4;
+    if(ddx*ddx + ddy*ddy < hitR*hitR){ loseHeart(); return; }
+  }
+
+  /* =========================================================
+     NAILS — dense metal spikes, floor or ceiling.
+     A simple box test: the whole row is lethal edge to edge.
+     ========================================================= */
+  for(let i=0;i<cur.nails.length;i++){
+    const nl=cur.nails[i];
+    if(!nl) continue;
+    if(hit(pb, nl)){ loseHeart(); return; }
+  }
+
+  /* =========================================================
+     RISERS — the stone that erupts out of the floor.
+     ---------------------------------------------------------
+     Three states, in order:
+
+       idle  → the stone is buried; it rises when the player is
+               close enough to be committed to the crossing
+       up    → solid; the fuse starts the moment you stand on it
+       dying → it has given way; it sinks and disappears
+
+     `respawn` decides whether it comes back, and the cooldown is
+     longer than the fuse so it never reappears under a player.
+     ========================================================= */
+  for(let i=0;i<cur.risers.length;i++){
+    const r=cur.risers[i];
+    if(!r) continue;
+    const rcx = r.x + r.w/2;
+
+    /* ---- idle / returning: watch for the player ---- */
+    if(r.state === 'idle'){
+      r.rise = Math.max(0, r.rise - dt * 3.2);   /* sink back if left alone */
+      const near = Math.abs(pcx0() - rcx) < 150;
+      if(near){
+        r.rise = Math.min(1, r.rise + dt * 3.4);
+        if(r.rise >= 1){ r.state = 'up'; AU.tone(240,.09,'sine',.05); }
+      }
+      continue;
+    }
+
+    if(r.state === 'gone'){
+      if(r.respawn){
+        r.cool -= dt;
+        if(r.cool <= 0){
+          r.state='idle'; r.timer=0; r.shake=0; r.rise=0;
+        }
+      }
+      continue;
+    }
+
+    if(r.state === 'dying'){
+      r.rise = Math.max(0, r.rise - dt * 4.0);
+      r.shake = Math.max(0, r.shake - dt*10);
+      if(r.rise <= 0){
+        r.state = 'gone';
+        r.cool = 2.8;
+        burst(rcx, r.y + r.h/2, cur.W.platTop, 12);
+      }
+      continue;
+    }
+
+    /* ---- up: the fuse only runs while the player stands on it ---- */
+    const standing = P.onGround && P.y+P.h >= r.y-4 && P.y+P.h <= r.y+8 &&
+                     P.x+P.w > r.x && P.x < r.x+r.w;
+    if(standing){
+      if(r.timer === 0){
+        r.timer = r.fuse || 0.6;
+        AU.tone(190,.10,'square',.05);
+      }
+      r.timer -= dt;
+      r.shake = Math.min(3, r.shake + dt*14);
+      if(r.timer <= 0){
+        r.state='dying'; r.timer=0;
+        AU.tone(120,.24,'sawtooth',.07,50);
+      }
+    } else {
+      r.shake = Math.max(0, r.shake - dt*10);
+    }
+  }
+
+  /* =========================================================
+     CRUSHERS — the stone that drops from the ceiling.
+     ---------------------------------------------------------
+     A four-state machine:
+
+       idle    → raised; triggers when the player is underneath
+       falling → travelling down at `speed`
+       held    → sitting at the bottom for a beat (this is the
+                 window the player must not be inside)
+       rising  → climbing back to its rest position
+
+     The trigger is the player's horizontal overlap, not their
+     distance, so it fires exactly when crossing would be fatal.
+     ========================================================= */
+  for(let i=0;i<cur.crushers.length;i++){
+    const c=cur.crushers[i];
+    if(!c) continue;
+    const overX = P.x + P.w > c.x + 6 && P.x < c.x + c.w - 6;
+
+    if(c.state === 'idle'){
+      if(overX && P.y + P.h > c.baseY + c.h){
+        c.state = 'falling';
+        AU.tone(150,.14,'square',.06);
+      }
+    } else if(c.state === 'falling'){
+      c.t = Math.min(1, c.t + dt * c.speed);
+      if(c.t >= 1){ c.state='held'; c.hold = 0.28; S.shake = Math.max(S.shake, 7); }
+    } else if(c.state === 'held'){
+      c.hold -= dt;
+      if(c.hold <= 0) c.state = 'rising';
+    } else {
+      c.t = Math.max(0, c.t - dt * c.speed * 0.8);
+      if(c.t <= 0) c.state = 'idle';
+    }
+
+    c.y = c.baseY + c.t * c.drop;
+
+    /* lethal only while it is actually moving or resting low */
+    if(c.t > 0.12 && hit(pb, {x:c.x, y:c.y, w:c.w, h:c.h})){ loseHeart(); return; }
   }
 
   /* checkpoints — touching one saves the respawn position */
@@ -1139,13 +1495,33 @@ function drawArches(W,par){
    drifts faster than the far silhouette and slower than the
    world. Gives real depth without any extra cost.
    ========================================================= */
+/* =========================================================
+   MID-LAYER PARALLAX — the world's own architecture
+   ---------------------------------------------------------
+   This band used to be a handful of abstract shapes: an ellipse
+   for clay, a bar for the mosque, a trestle for the market. The
+   result was five worlds that differed only in hue — the player
+   could not tell "Clay House" from "The Market" with the colour
+   stripped out.
+
+   Each branch below now draws the thing the world is NAMED after:
+
+     clay   · a domed mud house with a chimney, a door and lit
+              windows — a house you could live in
+     mosque · a colonnade of pointed arches with a hanging lamp
+     market · a stall with a striped awning and goods on a table
+     ruins  · a broken column with a fallen capital and rubble
+     tower  · an iron girder with rivets and a lit porthole
+
+   Everything is still plain paths, so the cost is unchanged.
+   ========================================================= */
 function drawMidLayer(W,par){
   const style=W.archStyle||'dome';
   const ox=-S.cam*par;
   const STEP=190;
   const cols=Math.ceil(VIEW_W/STEP)+3;
   ctx.save();
-  ctx.globalAlpha=.30;
+  ctx.globalAlpha=.34;
   ctx.fillStyle=W.arch;
 
   /* same fix as drawArches — seed from the world index, not the
@@ -1158,31 +1534,172 @@ function drawMidLayer(W,par){
     const seed = ((worldIndex*53) % 70 + 70) % 70;
     const baseY=530;
 
-    if(style==='clay'){
+    if(style==='dome'){
+      /* ---- CLAY HOUSE: a domed mud house ---- */
+      const h = 96 + seed*0.6;
+      const w = 118;
+
+      /* the wall */
+      ctx.fillRect(bx+8, baseY-h, w, h);
+
+      /* the dome */
       ctx.beginPath();
-      ctx.ellipse(bx+50, baseY, 74, 46+seed*0.3, 0, Math.PI, 0);
+      ctx.moveTo(bx+8, baseY-h);
+      ctx.quadraticCurveTo(bx+8+w/2, baseY-h-52, bx+8+w, baseY-h);
+      ctx.closePath(); ctx.fill();
+
+      /* the chimney */
+      ctx.fillRect(bx+8+w*0.72, baseY-h-34, 13, 34);
+
+      /* the door — a dark arch punched out of the wall */
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath();
+      ctx.moveTo(bx+8+w*0.42, baseY);
+      ctx.lineTo(bx+8+w*0.42, baseY-h*0.42);
+      ctx.quadraticCurveTo(bx+8+w*0.5, baseY-h*0.58, bx+8+w*0.58, baseY-h*0.42);
+      ctx.lineTo(bx+8+w*0.58, baseY);
+      ctx.closePath(); ctx.fill();
+      ctx.restore();
+
+      /* two lit windows */
+      ctx.save();
+      ctx.globalAlpha = .22; ctx.fillStyle = '#ffd79a';
+      ctx.fillRect(bx+8+w*0.16, baseY-h*0.62, 15, 18);
+      ctx.fillRect(bx+8+w*0.68, baseY-h*0.62, 15, 18);
+      ctx.restore();
+
+    } else if(style==='minaret'){
+      /* ---- OLD MOSQUE: a colonnade of pointed arches ---- */
+      const h = 128 + seed*0.5;
+      const archW = 62;
+
+      /* the wall the arches are cut into */
+      ctx.fillRect(bx, baseY-h, STEP*1.05, h);
+
+      /* three pointed arches, punched out */
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      for(let a=0;a<3;a++){
+        const ax = bx + 16 + a*archW;
+        ctx.beginPath();
+        ctx.moveTo(ax, baseY);
+        ctx.lineTo(ax, baseY-h*0.55);
+        ctx.quadraticCurveTo(ax+archW*0.5, baseY-h*0.95, ax+archW, baseY-h*0.55);
+        ctx.lineTo(ax+archW, baseY);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+
+      /* a hanging lamp in the middle arch */
+      ctx.save();
+      ctx.globalAlpha = .35; ctx.fillStyle = '#c9fff2';
+      ctx.fillRect(bx + 16 + archW + archW*0.5 - 1, baseY-h*0.92, 2, 22);
+      ctx.beginPath();
+      ctx.arc(bx + 16 + archW + archW*0.5, baseY-h*0.92 + 28, 7, 0, 7);
       ctx.fill();
-    } else if(style==='mosque'){
-      ctx.fillRect(bx+40, baseY-120-seed, 22, 120+seed);
+      ctx.restore();
+
+    } else if(style==='stalls'){
+      /* ---- THE MARKET: a stall with a striped awning ---- */
+      const h = 104 + seed*0.4;
+
+      /* the two poles */
+      ctx.fillRect(bx+18, baseY-h, 8, h);
+      ctx.fillRect(bx+124, baseY-h, 8, h);
+
+      /* the awning — a sloped canopy with a scalloped edge */
       ctx.beginPath();
-      ctx.moveTo(bx+40, baseY-120-seed);
-      ctx.lineTo(bx+51, baseY-150-seed);
-      ctx.lineTo(bx+62, baseY-120-seed);
+      ctx.moveTo(bx+6, baseY-h);
+      ctx.lineTo(bx+144, baseY-h);
+      ctx.lineTo(bx+132, baseY-h+26);
+      ctx.lineTo(bx+18, baseY-h+26);
       ctx.closePath(); ctx.fill();
-    } else if(style==='market'){
-      ctx.fillRect(bx+20, baseY-90, 8, 90);
-      ctx.fillRect(bx+120, baseY-90, 8, 90);
-      ctx.fillRect(bx+20, baseY-96, 108, 12);
-    } else if(style==='ruins'){
-      ctx.fillRect(bx+50, baseY-100-seed, 26, 100+seed);
+
+      /* scallops along the front edge */
+      for(let s=0;s<7;s++){
+        ctx.beginPath();
+        ctx.arc(bx+22+s*18, baseY-h+26, 9, 0, Math.PI);
+        ctx.fill();
+      }
+
+      /* the table under the awning */
+      ctx.fillRect(bx+16, baseY-34, 118, 8);
+      ctx.fillRect(bx+26, baseY-34, 6, 34);
+      ctx.fillRect(bx+118, baseY-34, 6, 34);
+
+      /* goods on the table — three little mounds */
+      for(let g=0;g<3;g++){
+        ctx.beginPath();
+        ctx.ellipse(bx+42+g*32, baseY-34, 11, 7, 0, Math.PI, 0);
+        ctx.fill();
+      }
+
+    } else if(style==='broken'){
+      /* ---- RUINED COURT: a broken column and a fallen capital ---- */
+      const h = 118 + seed*0.8;
+
+      /* the standing shaft */
+      ctx.fillRect(bx+46, baseY-h, 30, h);
+
+      /* the jagged break at the top */
       ctx.beginPath();
-      ctx.ellipse(bx+63, baseY-100-seed, 26, 10, 0, 0, 7); ctx.fill();
+      ctx.moveTo(bx+46, baseY-h);
+      ctx.lineTo(bx+56, baseY-h-16);
+      ctx.lineTo(bx+64, baseY-h+4);
+      ctx.lineTo(bx+72, baseY-h-10);
+      ctx.lineTo(bx+76, baseY-h);
+      ctx.closePath(); ctx.fill();
+
+      /* the base */
+      ctx.fillRect(bx+38, baseY-14, 46, 14);
+
+      /* the fallen capital, lying on the ground */
+      ctx.beginPath();
+      ctx.ellipse(bx+118, baseY-9, 30, 12, 0, 0, 7);
+      ctx.fill();
+
+      /* rubble */
+      ctx.beginPath();
+      ctx.ellipse(bx+160, baseY-5, 22, 8, 0, 0, 7);
+      ctx.fill();
+
     } else {
+      /* ---- LANTERN TOWER: an iron girder with a lit porthole ---- */
+      const h = 140 + seed*0.7;
+
+      /* the girder */
+      ctx.fillRect(bx+44, baseY-h, 26, h);
+
+      /* cross-bracing */
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      for(let b=0;b<4;b++){
+        const by = baseY-h + 18 + b*30;
+        ctx.beginPath();
+        ctx.moveTo(bx+44, by);
+        ctx.lineTo(bx+70, by+22);
+        ctx.lineTo(bx+70, by+28);
+        ctx.lineTo(bx+44, by+6);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+
+      /* the flange plates */
+      ctx.fillRect(bx+38, baseY-h, 38, 8);
+      ctx.fillRect(bx+38, baseY-8, 38, 8);
+
+      /* a lit porthole */
+      ctx.save();
+      ctx.globalAlpha = .30; ctx.fillStyle = '#ffb15c';
       ctx.beginPath();
-      ctx.moveTo(bx+40, baseY);
-      ctx.lineTo(bx+56, baseY-140-seed);
-      ctx.lineTo(bx+72, baseY);
-      ctx.closePath(); ctx.fill();
+      ctx.arc(bx+57, baseY-h*0.42, 9, 0, 7);
+      ctx.fill();
+      ctx.restore();
+
+      /* a second, shorter girder beside it */
+      ctx.fillRect(bx+112, baseY-h*0.55, 20, h*0.55);
+      ctx.fillRect(bx+106, baseY-h*0.55, 32, 7);
     }
   }
   ctx.restore();
@@ -1196,22 +1713,52 @@ function drawMidLayer(W,par){
    ruins  : cracked stone blocks with moss
    tower  : riveted iron with glowing embers
    ========================================================= */
-function drawPlat(p,W){
+/* =========================================================
+   PLATFORM BODY — ONE renderer for every solid stone.
+   ---------------------------------------------------------
+   THE BUG THIS FIXES
+   ------------------
+   The fragile platform had its own hand-written renderer that
+   looked nothing like the ground it sat between: a chipped
+   outline, a black border, three fat cracks and a bright amber
+   bar along the top. In a screenshot it read as a foreign object
+   dropped into the level, not as a rock that happens to be weak.
+
+   A fragile stone is not a different MATERIAL. It is the same
+   stone, with a countdown. So both now go through this one
+   function, and the only thing the fragile path can change is
+   `heat` (0..1) — which warms the palette and nothing else.
+
+   No outlines are drawn above the silhouette, no extra shapes are
+   added, and every decorative mark is clipped to the block. That
+   is what stops a line from ever escaping a stone again.
+   ========================================================= */
+function drawPlatBody(p, W, heat){
   const style = W.id || 'clay';
+  const h = (heat === undefined) ? 0 : heat;
+  const r = style==='clay' ? 11 : (style==='mosque' ? 4 : (style==='market' ? 5 : (style==='ruins' ? 3 : 6)));
+
   ctx.save();
 
   /* drop shadow — shared by every style */
   ctx.fillStyle='rgba(0,0,0,.42)';
-  rr(ctx,p.x+3,p.y+6,p.w,p.h,style==='clay'?11:6); ctx.fill();
+  rr(ctx,p.x+3,p.y+6,p.w,p.h,r); ctx.fill();
 
   const g=ctx.createLinearGradient(0,p.y,0,p.y+p.h);
-  g.addColorStop(0,W.platTop); g.addColorStop(1,W.platBot);
+  /* heat warms the top of the block without changing its shape */
+  g.addColorStop(0, h > 0 ? '#c9905e' : W.platTop);
+  g.addColorStop(1, W.platBot);
 
   if(style==='clay'){
     /* rounded, hand-made mud brick */
-    rr(ctx,p.x,p.y,p.w,p.h,11);
+    rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
     ctx.strokeStyle='rgba(255,255,255,.09)'; ctx.lineWidth=1; ctx.stroke();
+
+    /* everything below is clipped to the brick, so a fleck or a
+       seam can never stick out of the silhouette */
+    ctx.save();
+    rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
     /* straw flecks along the top */
     ctx.fillStyle=W.accent; ctx.globalAlpha=.55;
     for(let i=0;i<p.w;i+=17){
@@ -1222,14 +1769,29 @@ function drawPlat(p,W){
     for(let i=0;i<p.w;i+=38){
       rr(ctx,p.x+8+i, p.y+p.h*0.45, 20, 3, 1.5); ctx.fill();
     }
+    ctx.restore();
 
-  } else if(style==='mosque'){
+    if(h > 0){
+      /* the only warning the fragile stone gets: it warms from the
+         inside. No bar, no stripe, no outline. */
+      ctx.save();
+      rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.16 + 0.22*h;
+      const warm = ctx.createLinearGradient(0,p.y,0,p.y+p.h);
+      warm.addColorStop(0,'rgba(255,150,70,0.9)');
+      warm.addColorStop(1,'rgba(255,90,30,0)');
+      ctx.fillStyle = warm;
+      ctx.fillRect(p.x,p.y,p.w,p.h);
+      ctx.restore();
+    }
+
     /* polished marble slab */
-    rr(ctx,p.x,p.y,p.w,p.h,4);
+    rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
     /* marble veins */
     ctx.save();
-    ctx.beginPath(); rr(ctx,p.x,p.y,p.w,p.h,4); ctx.clip();
+    rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
     ctx.strokeStyle='rgba(255,255,255,.10)'; ctx.lineWidth=1;
     for(let i=0;i<p.w;i+=46){
       ctx.beginPath();
@@ -1237,40 +1799,31 @@ function drawPlat(p,W){
       ctx.quadraticCurveTo(p.x+i+14, p.y+p.h*0.5, p.x+i+4, p.y+p.h);
       ctx.stroke();
     }
-    ctx.restore();
     /* gold inlay along the top edge */
     ctx.fillStyle='#e8c979'; ctx.globalAlpha=.75;
     rr(ctx,p.x+2,p.y+1.5,p.w-4,2.4,1.2); ctx.fill();
     ctx.globalAlpha=.35;
     rr(ctx,p.x+2,p.y+p.h-3,p.w-4,1.6,0.8); ctx.fill();
+    ctx.restore();
 
   } else if(style==='market'){
     /* wooden planks with visible seams */
-    rr(ctx,p.x,p.y,p.w,p.h,5);
+    rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
     ctx.save();
-    ctx.beginPath(); rr(ctx,p.x,p.y,p.w,p.h,5); ctx.clip();
+    rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
     ctx.strokeStyle='rgba(0,0,0,.35)'; ctx.lineWidth=1.4;
     for(let i=22;i<p.w;i+=22){
       ctx.beginPath(); ctx.moveTo(p.x+i,p.y); ctx.lineTo(p.x+i,p.y+p.h); ctx.stroke();
     }
     ctx.restore();
-    /* cloth trim hanging off the front edge */
-    ctx.fillStyle=W.accent; ctx.globalAlpha=.6;
-    for(let i=0;i<p.w;i+=26){
-      ctx.beginPath();
-      ctx.moveTo(p.x+i, p.y+p.h);
-      ctx.lineTo(p.x+i+13, p.y+p.h);
-      ctx.lineTo(p.x+i+6.5, p.y+p.h+7);
-      ctx.closePath(); ctx.fill();
-    }
 
   } else if(style==='ruins'){
     /* broken stone blocks of uneven height */
-    rr(ctx,p.x,p.y,p.w,p.h,3);
+    rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
     ctx.save();
-    ctx.beginPath(); rr(ctx,p.x,p.y,p.w,p.h,3); ctx.clip();
+    rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
     ctx.strokeStyle='rgba(0,0,0,.40)'; ctx.lineWidth=1.6;
     let bx=p.x;
     let k=0;
@@ -1280,22 +1833,19 @@ function drawPlat(p,W){
       bx += bw; k++;
     }
     ctx.beginPath(); ctx.moveTo(p.x,p.y+p.h*0.55); ctx.lineTo(p.x+p.w,p.y+p.h*0.55); ctx.stroke();
-    /* cracks */
-    ctx.strokeStyle='rgba(255,255,255,.09)';
-    ctx.beginPath();
-    ctx.moveTo(p.x+p.w*0.3,p.y); ctx.lineTo(p.x+p.w*0.36,p.y+p.h*0.6);
-    ctx.lineTo(p.x+p.w*0.3,p.y+p.h); ctx.stroke();
-    ctx.restore();
     /* moss on the top edge */
     ctx.fillStyle='rgba(120,190,140,.30)';
     for(let i=0;i<p.w;i+=29){
       ctx.beginPath(); ctx.arc(p.x+i+6, p.y+1.5, 3.4, 0, 7); ctx.fill();
     }
+    ctx.restore();
 
   } else { /* tower — riveted iron */
-    rr(ctx,p.x,p.y,p.w,p.h,6);
+    rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
     ctx.strokeStyle='rgba(255,255,255,.12)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.save();
+    rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
     /* rivets */
     ctx.fillStyle='rgba(255,220,170,.35)';
     for(let i=8;i<p.w-4;i+=24){
@@ -1307,9 +1857,15 @@ function drawPlat(p,W){
     ctx.globalAlpha=.28;
     ctx.fillStyle='#ffd9a8';
     rr(ctx,p.x+4,p.y+p.h-4,p.w-8,2,1); ctx.fill();
+    ctx.restore();
   }
 
   ctx.restore();
+}
+
+/* the public entry point — a solid platform is just the body with no heat */
+function drawPlat(p,W){
+  drawPlatBody(p, W, 0);
 }
 
 /* =========================================================
@@ -1548,59 +2104,80 @@ function drawCheckpoint(c,W){
 function drawCrumb(c,W){
   if(!c.alive) return;
 
-  const sh  = c.shake > 0 ? rnd(-c.shake, c.shake) : 0;
-  const wob = c.timer > 0 ? 1 + Math.sin(S.t*30)*0.035 : 1;
-  const urgency = c.timer > 0 ? Math.min(1, (0.55 - c.timer) / 0.55) : 0;
+  /* =========================================================
+     THE BUG THIS FIXES
+     ---------------------------------------------------------
+     `urgency` was computed against a hard-coded 0.55 — the old
+     constant fuse. The moment the fuse became per-platform, that
+     number was wrong for every platform whose fuse was not 0.55:
+     a 0.90s platform looked almost-dead the instant you touched
+     it, and a 0.30s platform never lit up at all.
 
-  ctx.save();
-  ctx.translate(c.x + c.w/2 + sh, c.y + c.h/2);
-  ctx.scale(wob, 2 - wob);
-  ctx.translate(-c.w/2, -c.h/2);
+     It is now derived from the platform's own `fuse`, so the
+     visual warning always matches the real countdown. A player
+     who reads the glow gets a truthful answer.
+     ========================================================= */
+  /* =========================================================
+     FRAGILE STONE — redrawn from the ground up.
+     ---------------------------------------------------------
+     THE BUG THIS REPLACES
+     ---------------------
+     The previous version drew a rounded rectangle, then added a
+     "permanent amber hairline" along its top edge with
+     `rr(ctx, 1.5, 0, c.w-3, 2.2, 1.1)`. Two things were wrong:
 
-  /* body */
-  const g = ctx.createLinearGradient(0, 0, 0, c.h);
-  g.addColorStop(0, urgency > 0 ? '#ffb98a' : W.platTop);
-  g.addColorStop(1, W.platBot);
-  rr(ctx, 0, 0, c.w, c.h, 6);
-  ctx.fillStyle = g;
-  ctx.fill();
+       · the hairline was a rounded rect, so its own corner radius
+         pushed it OUTSIDE the stone's silhouette — a bright bar
+         floating above the platform
+       · the whole block was already inside a `ctx.scale(wob, 2-wob)`
+         squash, so that bar was also being stretched and shifted
+         every frame. The result was a line that visibly detached
+         from the rock and drifted off it.
 
-  /* edge — brightens toward orange as it fails */
-  ctx.strokeStyle = urgency > 0
-    ? 'rgba(255,150,90,' + (0.55 + urgency*0.45) + ')'
-    : 'rgba(255,255,255,.14)';
-  ctx.lineWidth = 1 + urgency;
-  ctx.stroke();
+     A fragile stone is now built the way a rock is built:
+       · an irregular chipped silhouette, not a rounded box
+       · a lit top face, a shaded front face, a dark underside
+       · cracks that are CLIPPED to the silhouette, so they can
+         never escape it
+       · a warm rim that lives INSIDE the shape, not on top of it
 
-  /* hairline cracks are ALWAYS visible — that is the warning */
-  const crackAlpha = 0.28 + urgency * 0.55;
-  ctx.strokeStyle = 'rgba(0,0,0,' + crackAlpha + ')';
-  ctx.lineWidth = 1 + urgency * 1.4;
-  ctx.beginPath();
-  ctx.moveTo(c.w*0.28, 0);
-  ctx.lineTo(c.w*0.38, c.h*0.45);
-  ctx.lineTo(c.w*0.30, c.h);
-  ctx.moveTo(c.w*0.66, 0);
-  ctx.lineTo(c.w*0.58, c.h*0.55);
-  ctx.lineTo(c.w*0.70, c.h);
-  if(urgency > 0.3){
-    ctx.moveTo(c.w*0.48, 0);
-    ctx.lineTo(c.w*0.52, c.h*0.7);
-  }
-  ctx.stroke();
+     Everything is drawn in local coordinates with the shake
+     applied as a translate only — no non-uniform scale, so no
+     shape can be stretched out of its own outline.
+     ========================================================= */
+  /* =========================================================
+     FRAGILE STONE — the SAME stone as the ground, until you touch it.
+     ---------------------------------------------------------
+     Every previous version of this function drew a shape that was
+     not a platform: a chipped outline, a black border, cracks, a
+     glow. The player could spot a fragile stone from across the
+     level, which defeats the point — a trap you can see coming is
+     just a staircase.
 
-  /* a warning shimmer on the top edge while it is about to give way */
-  if(urgency > 0){
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = urgency * (0.45 + 0.35*Math.sin(S.t*22));
-    ctx.fillStyle = '#ff8a4a';
-    rr(ctx, 1, 0, c.w-2, 2.5, 1.2);
-    ctx.fill();
-    ctx.restore();
-  }
+     It now renders through `drawPlatBody`, the exact same routine
+     every solid stone uses. Before you stand on it there is NO
+     difference at all: same silhouette, same palette, same
+     texture. The only thing that changes is `heat`, and heat only
+     rises once the fuse is already burning — i.e. once you are
+     standing on it and it is too late to be surprised.
 
-  ctx.restore();
+     The fuse is short (see TUNE.FUSE_MIN in levels.js) and the
+     stone gives way fast, so the read is: identical rock → you
+     step on it → it flashes warm → it is gone.
+     ========================================================= */
+  const fuse = c.fuse || 0.55;
+  const urgency = c.timer > 0
+    ? Math.min(1, Math.max(0, (fuse - c.timer) / fuse))
+    : 0;
+
+  /* a small shake while the fuse burns — the only motion cue */
+  const sh = c.shake > 0 ? rnd(-c.shake, c.shake) : 0;
+
+  drawPlatBody(
+    { x: c.x + sh, y: c.y, w: c.w, h: c.h },
+    W,
+    urgency
+  );
 }
 
 /* =========================================================
@@ -1771,7 +2348,48 @@ function drawLava(l,W){
   const surfaceY = l.y;
   const n = Math.max(2, Math.round(l.w / 34));
 
-  /* ---------- 1 · the molten body (opaque, no blending) ---------- */
+  /* =========================================================
+     THE PIT
+     ---------------------------------------------------------
+     Everything below the ground line gets drawn here, and it is
+     the reason a pool no longer looks like it is floating:
+     two rock walls drop from the ground line down past the molten
+     body, and a rock floor closes the bottom. The lava is then
+     painted between those walls, so the fire is visibly a hole in
+     the earth with rock on every side.
+     ========================================================= */
+  const gy   = (l.gy !== undefined) ? l.gy : 500;
+  const bot  = l.y + l.h;
+  const rim  = 15;                       /* width of the stone lip     */
+  const bx   = l.x - rim;
+  const bw   = l.w + rim*2;
+  /* the pool runs hundreds of units down (it must have no floor to land
+     on), but the rock around it only needs drawing as far as the bottom
+     of the screen — anything deeper is pure wasted fill */
+  const deep = Math.min(bot + 26, gy + 150);
+
+  ctx.save();
+  const rock = ctx.createLinearGradient(0, gy, 0, deep);
+  rock.addColorStop(0,   '#2b1710');
+  rock.addColorStop(0.30,'#180b06');
+  rock.addColorStop(1,   '#070302');
+  ctx.fillStyle = rock;
+  /* left wall — hangs from the ground line, same height as the pit */
+  rr(ctx, bx, gy - 2, rim + 2, deep - gy + 2, 3); ctx.fill();
+  /* right wall */
+  rr(ctx, l.x + l.w - 1, gy - 2, rim + 2, deep - gy + 2, 3); ctx.fill();
+  /* the floor of the pit, when it is shallow enough to be on screen */
+  if(bot < deep) rr(ctx, bx, bot - 2, bw, deep - bot + 4, 3); ctx.fill();
+
+  /* a hot lip of stone where the rock meets the ground — the fissure
+     itself glows, which is what the player reads before falling in */
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = 'rgba(255,120,40,.30)';
+  rr(ctx, bx, gy - 2, rim + 2, 3, 1.5); ctx.fill();
+  rr(ctx, l.x + l.w - 1, gy - 2, rim + 2, 3, 1.5); ctx.fill();
+  ctx.restore();
+
+  /* ---------- 2 · the molten body, sitting in the pit ---------- */
   ctx.save();
   const body = ctx.createLinearGradient(0, l.y, 0, l.y + l.h);
   body.addColorStop(0,   '#ffb347');
@@ -1830,12 +2448,13 @@ function drawLava(l,W){
   }
   ctx.globalAlpha = 1;
 
-  /* heat haze rising off the pool */
-  const haze = ctx.createLinearGradient(0, surfaceY - 52, 0, surfaceY + 4);
+  /* heat haze rising OUT of the pit mouth — it starts above the ground
+     line so the glow spills over the rim like a real fissure */
+  const haze = ctx.createLinearGradient(0, surfaceY - 78, 0, surfaceY + 4);
   haze.addColorStop(0, 'rgba(255,120,40,0)');
   haze.addColorStop(1, 'rgba(255,130,45,0.26)');
   ctx.fillStyle = haze;
-  ctx.fillRect(l.x, surfaceY - 52, l.w, 56);
+  ctx.fillRect(l.x, surfaceY - 78, l.w, 82);
 
   ctx.restore();
 }
@@ -1906,6 +2525,285 @@ function drawSpikes(s,W){
   ctx.fillRect(s.x, baseY - 2, s.w, 2);
 
   ctx.restore();
+}
+
+/* =========================================================
+   SAW — a spinning blade.
+   ---------------------------------------------------------
+   Four passes, in this order, because that is the order that
+   makes it read as METAL rather than as a circle:
+
+     1. a soft heat ring underneath (it is a hazard, so it glows)
+     2. the dark disc body
+     3. the teeth — a real polygon, not a scalloped circle
+     4. a bright rim + hub, so the rotation is visible at speed
+
+   The teeth are drawn as a single path with alternating radii,
+   which is both cheap and genuinely serrated.
+   ========================================================= */
+function drawSaw(s,W){
+  const cx = s.x, cy = s.y, r = s.r;
+
+  /* ---- 1 · hazard glow ---- */
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const gl = ctx.createRadialGradient(cx,cy,0,cx,cy,r*2.1);
+  gl.addColorStop(0,   'rgba(255,120,80,0.22)');
+  gl.addColorStop(0.55,'rgba(255,90,60,0.07)');
+  gl.addColorStop(1,   'rgba(255,80,50,0)');
+  ctx.fillStyle = gl;
+  ctx.beginPath(); ctx.arc(cx,cy,r*2.1,0,6.2832); ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(s.spin);
+
+  /* ---- 2 · dark disc body ---- */
+  const body = ctx.createRadialGradient(0,-r*0.3,0,0,0,r);
+  body.addColorStop(0,   '#8a8f9c');
+  body.addColorStop(0.55,'#4a4f5c');
+  body.addColorStop(1,   '#1d2129');
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(0,0,r*0.82,0,6.2832); ctx.fill();
+
+  /* ---- 3 · teeth ---- */
+  const TEETH = 12;
+  ctx.beginPath();
+  for(let i=0;i<TEETH;i++){
+    const a0 = (i / TEETH) * 6.2832;
+    const a1 = ((i + 0.5) / TEETH) * 6.2832;
+    const a2 = ((i + 1) / TEETH) * 6.2832;
+    if(i === 0) ctx.moveTo(Math.cos(a0)*r*0.82, Math.sin(a0)*r*0.82);
+    ctx.lineTo(Math.cos(a1)*r,        Math.sin(a1)*r);
+    ctx.lineTo(Math.cos(a2)*r*0.82,   Math.sin(a2)*r*0.82);
+  }
+  ctx.closePath();
+  const tg = ctx.createLinearGradient(-r,0,r,0);
+  tg.addColorStop(0,   '#b9bfcc');
+  tg.addColorStop(0.5, '#6e7482');
+  tg.addColorStop(1,   '#2b303a');
+  ctx.fillStyle = tg;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,.55)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  /* ---- 4 · bright rim + hub ---- */
+  ctx.strokeStyle = 'rgba(255,240,220,.55)';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.arc(0,0,r*0.80,0,6.2832); ctx.stroke();
+
+  ctx.fillStyle = '#ffd9a8';
+  ctx.beginPath(); ctx.arc(0,0,r*0.20,0,6.2832); ctx.fill();
+  ctx.fillStyle = 'rgba(30,20,10,.85)';
+  ctx.beginPath(); ctx.arc(0,0,r*0.09,0,6.2832); ctx.fill();
+
+  ctx.restore();
+}
+
+/* =========================================================
+   NAILS — a dense row of short metal spikes.
+   Deliberately reads differently from `drawSpikes`: thinner,
+   brighter, and with a visible base rail, so the player never
+   mistakes one hazard for the other.
+   ========================================================= */
+function drawNails(n,W){
+  const dir = n.dir;
+  const n_count = Math.max(1, Math.round(n.w / 13));
+  const step = n.w / n_count;
+
+  ctx.save();
+
+  /* the base rail the nails are set into */
+  const railY = dir === 1 ? n.y + n.h : n.y;
+  ctx.fillStyle = 'rgba(40,44,52,.95)';
+  rr(ctx, n.x, railY - (dir===1?4:0), n.w, 4, 1.5);
+  ctx.fill();
+
+  for(let i=0;i<n_count;i++){
+    const x0 = n.x + i*step;
+    const midX = x0 + step/2;
+    const tipY = dir === 1 ? n.y : n.y + n.h;
+    const baseY = dir === 1 ? n.y + n.h : n.y;
+
+    /* dark body */
+    ctx.fillStyle = '#2a2e36';
+    ctx.beginPath();
+    ctx.moveTo(x0 + step*0.18, baseY);
+    ctx.lineTo(midX, tipY);
+    ctx.lineTo(x0 + step*0.82, baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    /* lit face */
+    const face = ctx.createLinearGradient(midX, tipY, x0, baseY);
+    face.addColorStop(0,   '#ffffff');
+    face.addColorStop(0.5, '#cfd6e2');
+    face.addColorStop(1,   '#5a6270');
+    ctx.fillStyle = face;
+    ctx.beginPath();
+    ctx.moveTo(x0 + step*0.18, baseY);
+    ctx.lineTo(midX, tipY);
+    ctx.lineTo(midX, baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    /* hard specular tip */
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    ctx.beginPath();
+    ctx.moveTo(midX - step*0.06, tipY + (dir===1? n.h*0.34 : -n.h*0.34));
+    ctx.lineTo(midX, tipY);
+    ctx.lineTo(midX + step*0.06, tipY + (dir===1? n.h*0.34 : -n.h*0.34));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* =========================================================
+   RISER — the stone that erupts out of the floor.
+   ---------------------------------------------------------
+   Two things sell it:
+
+     · a dust plume at the base while it is climbing, so the
+       player SEES it coming rather than being teleported onto it
+     · the same crack-and-glow language as a fragile platform,
+       so the "this will give way" read is consistent across the
+       whole game
+
+   `rise` (0..1) drives both the vertical offset and the alpha,
+   so a buried stone is genuinely invisible.
+   ========================================================= */
+function drawRiser(r,W){
+  if(r.state === 'gone' || r.rise <= 0.02) return;
+
+  const e = r.rise;
+  const yOff = (1 - e) * (r.h + 26);
+  const drawY = r.y + yOff;
+
+  const urgency = r.timer > 0
+    ? Math.min(1, Math.max(0, ((r.fuse||0.6) - r.timer) / (r.fuse||0.6)))
+    : 0;
+
+  /* ---- dust plume at the base while climbing ---- */
+  if(e < 0.99){
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = (1 - e) * 0.5;
+    ctx.fillStyle = W.accent2;
+    for(let i=0;i<5;i++){
+      const px = r.x + (i+0.5) * (r.w/5);
+      const py = r.y + r.h + 6 + Math.sin(S.t*9 + i)*4;
+      ctx.beginPath(); ctx.arc(px, py, 4 + (1-e)*5, 0, 6.2832); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, e * 1.6);
+
+  /* ---- body ---- */
+  const g = ctx.createLinearGradient(0, drawY, 0, drawY + r.h);
+  g.addColorStop(0, urgency > 0 ? '#ffb98a' : W.platTop);
+  g.addColorStop(1, W.platBot);
+  rr(ctx, r.x, drawY, r.w, r.h, 5);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  /* ---- edge ---- */
+  ctx.strokeStyle = urgency > 0
+    ? 'rgba(255,150,90,' + (0.55 + urgency*0.45) + ')'
+    : 'rgba(255,255,255,.16)';
+  ctx.lineWidth = 1 + urgency;
+  ctx.stroke();
+
+  /* ---- cracks, always visible once it is up ---- */
+  ctx.strokeStyle = 'rgba(0,0,0,' + (0.26 + urgency*0.55) + ')';
+  ctx.lineWidth = 1 + urgency*1.3;
+  ctx.beginPath();
+  ctx.moveTo(r.x + r.w*0.30, drawY);
+  ctx.lineTo(r.x + r.w*0.40, drawY + r.h*0.5);
+  ctx.lineTo(r.x + r.w*0.32, drawY + r.h);
+  ctx.moveTo(r.x + r.w*0.68, drawY);
+  ctx.lineTo(r.x + r.w*0.60, drawY + r.h*0.6);
+  ctx.lineTo(r.x + r.w*0.72, drawY + r.h);
+  ctx.stroke();
+
+  /* ---- warning shimmer ---- */
+  if(urgency > 0){
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = urgency * (0.45 + 0.35*Math.sin(S.t*22));
+    ctx.fillStyle = '#ff8a4a';
+    rr(ctx, r.x+1, drawY, r.w-2, 2.5, 1.2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+/* =========================================================
+   CRUSHER — the stone that drops from the ceiling.
+   ---------------------------------------------------------
+   The tell is the RAIL: a dashed guide line from the stone's
+   rest position down to the floor. The player can see exactly
+   where it will land before it ever moves — which is what makes
+   a falling stone fair rather than a surprise.
+   ========================================================= */
+function drawCrusher(c,W){
+  /* ---- the guide rail ---- */
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,120,90,.20)';
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5,6]);
+  ctx.beginPath();
+  ctx.moveTo(c.x + c.w*0.5, c.baseY + c.h);
+  ctx.lineTo(c.x + c.w*0.5, c.baseY + c.h + c.drop);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  /* ---- shadow on the floor, growing as it falls ---- */
+  const fall = c.t;
+  ctx.save();
+  ctx.globalAlpha = 0.25 + fall*0.35;
+  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  const sw = c.w * (0.7 + fall*0.5);
+  ctx.beginPath();
+  ctx.ellipse(c.x + c.w*0.5, c.baseY + c.h + c.drop + 4, sw*0.55, 6, 0, 0, 6.2832);
+  ctx.fill();
+  ctx.restore();
+
+  /* ---- the stone ---- */
+  const g = ctx.createLinearGradient(0, c.y, 0, c.y + c.h);
+  g.addColorStop(0, W.platBot);
+  g.addColorStop(1, W.platTop);
+  rr(ctx, c.x, c.y, c.w, c.h, 4);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  /* ---- iron bands ---- */
+  ctx.fillStyle = 'rgba(255,255,255,.10)';
+  rr(ctx, c.x+3, c.y+4, c.w-6, 3, 1.5); ctx.fill();
+  rr(ctx, c.x+3, c.y+c.h-7, c.w-6, 3, 1.5); ctx.fill();
+
+  /* ---- an angry rim while it is moving ---- */
+  if(c.state === 'falling' || c.state === 'held'){
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.45 + 0.35*Math.sin(S.t*18);
+    ctx.strokeStyle = '#ff7a5a';
+    ctx.lineWidth = 2;
+    rr(ctx, c.x, c.y, c.w, c.h, 4);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /* Gem glow is a cached sprite — there can be a dozen gems on screen
@@ -2434,11 +3332,70 @@ function drawDarkness(W){
     if(f.x>dL && f.x<dR && f.on)
       hole((f.x+f.w/2-S.cam)*SCALE, (f.y+f.h*0.5)*SCALE, 120*SCALE, .55);
   }
+  /* =========================================================
+     FRAGILE STONES MUST BE VISIBLE IN THE DARK
+     ---------------------------------------------------------
+     A crumbling platform is the one hazard the player has to read
+     BEFORE stepping on it — the cracks are the whole warning. It
+     punched no light hole, so at night it was indistinguishable
+     from the void and the first thing the player learned about it
+     was that they had already fallen. A weak amber hole now picks
+     it out of the dark from a distance.
+     ========================================================= */
+  if(cur.crumbs) for(let i=0;i<cur.crumbs.length;i++){
+    const c=cur.crumbs[i];
+    if(!c || !c.alive) continue;
+    if(c.x>dL && c.x<dR)
+      hole((c.x+c.w/2-S.cam)*SCALE, (c.y+c.h/2)*SCALE,
+           (c.w*0.55+26)*SCALE, .40);
+  }
   /* lava glows too — a wide, soft pool of light */
   if(cur.lavas) for(let i=0;i<cur.lavas.length;i++){
     const l=cur.lavas[i];
     if(l.x>dL && l.x<dR)
       hole((l.x+l.w/2-S.cam)*SCALE, l.y*SCALE, (l.w*0.55)*SCALE, .5);
+  }
+
+  /* =========================================================
+     THE NEW FAMILIES MUST BE VISIBLE IN THE DARK
+     ---------------------------------------------------------
+     A hazard the player cannot see is not a hazard, it is a
+     trap. Every new family punches its own light hole so the
+     lantern reveals it before it kills you:
+
+       saw     · a cold steel glint, tight radius
+       nails   · a faint metal sheen along the row
+       riser   · warm dust while it climbs, then the stone itself
+       crusher · a red warning pool at its landing spot
+     ========================================================= */
+  if(cur.saws) for(let i=0;i<cur.saws.length;i++){
+    const s=cur.saws[i];
+    if(!s) continue;
+    if(s.x>dL && s.x<dR)
+      hole((s.x-S.cam)*SCALE, s.y*SCALE, (s.r*3.4)*SCALE, .42);
+  }
+  if(cur.nails) for(let i=0;i<cur.nails.length;i++){
+    const n=cur.nails[i];
+    if(!n) continue;
+    if(n.x>dL && n.x<dR)
+      hole((n.x+n.w/2-S.cam)*SCALE, (n.y+n.h/2)*SCALE, (n.w*0.55+40)*SCALE, .34);
+  }
+  if(cur.risers) for(let i=0;i<cur.risers.length;i++){
+    const r=cur.risers[i];
+    if(!r) continue;
+    if(r.state!=='gone' && r.x>dL && r.x<dR)
+      hole((r.x+r.w/2-S.cam)*SCALE, (r.y+r.h/2)*SCALE,
+           (60 + (1-r.rise)*70)*SCALE, r.rise>0.1 ? .5 : .28);
+  }
+  if(cur.crushers) for(let i=0;i<cur.crushers.length;i++){
+    const c=cur.crushers[i];
+    if(!c) continue;
+    if(c.x>dL && c.x<dR){
+      /* the landing zone stays lit even while the stone is raised —
+         that is the whole point of the warning rail */
+      hole((c.x+c.w/2-S.cam)*SCALE, (c.baseY+c.h+c.drop)*SCALE, (c.w*1.1)*SCALE, .30);
+      hole((c.x+c.w/2-S.cam)*SCALE, (c.y+c.h/2)*SCALE, (c.w*0.9)*SCALE, .38);
+    }
   }
   const gl=cur.goal;
   if(gl.x>dL && gl.x<dR) hole((gl.x+gl.w/2-S.cam)*SCALE, (gl.y+gl.h/2)*SCALE, 150*SCALE, .95);
@@ -2452,6 +3409,24 @@ function drawDarkness(W){
   ctx.drawImage(darkCv, 0,0, VW, VH, 0,0, VW, VH);
   ctx.restore();
 
+  /* =========================================================
+     EDGE SHADOW — the world fades at the edges of the screen
+     ---------------------------------------------------------
+     The lantern already lights a circle around the player, but
+     the HORIZONTAL edges of the viewport stayed fully lit, so the
+     scene looked flat: a bright band running off both sides.
+
+     This adds two soft vertical gradients over the left and right
+     edges. They are drawn AFTER the light holes, so the lantern
+     burns through them as the player approaches an edge — the
+     world literally lights up as you walk into it.
+
+     The gradients are cached in a small offscreen canvas and
+     blitted, so the cost is two drawImage calls per frame
+     regardless of viewport size.
+     ========================================================= */
+  drawEdgeShadow();
+
   /* warm light tint — blitted, and now dimmer at the centre so it
      warms the air without washing out the character */
   if(!tintReady) buildTintSprite();
@@ -2460,6 +3435,58 @@ function drawDarkness(W){
   ctx.globalCompositeOperation='lighter';
   ctx.globalAlpha = 0.55;
   ctx.drawImage(tintCv, px-tr, py-tr, tr*2, tr*2);
+  ctx.restore();
+}
+
+/* =========================================================
+   EDGE SHADOW SPRITE
+   ---------------------------------------------------------
+   A single 256×1 strip, gradient from opaque black on the left to
+   transparent on the right. It is stretched to whatever width the
+   edge band needs and mirrored for the right-hand side, so one
+   tiny canvas serves both edges at any viewport size.
+   ========================================================= */
+const edgeCv = document.createElement('canvas');
+const edgeCx = edgeCv.getContext('2d');
+let edgeReady = false;
+
+function buildEdgeShadow(){
+  edgeCv.width  = 256;
+  edgeCv.height = 1;
+  edgeCx.clearRect(0, 0, 256, 1);
+  const g = edgeCx.createLinearGradient(0, 0, 256, 0);
+  /* full black at the very edge, easing out to nothing */
+  g.addColorStop(0,    'rgba(4,2,10,0.92)');
+  g.addColorStop(0.28, 'rgba(4,2,10,0.62)');
+  g.addColorStop(0.62, 'rgba(4,2,10,0.24)');
+  g.addColorStop(1,    'rgba(4,2,10,0)');
+  edgeCx.fillStyle = g;
+  edgeCx.fillRect(0, 0, 256, 1);
+  edgeReady = true;
+}
+
+function drawEdgeShadow(){
+  if(!edgeReady) buildEdgeShadow();
+
+  /* the band is a fraction of the viewport width, clamped so it
+     never eats the play area on a narrow screen */
+  const bandW = Math.min(VW * 0.22, 260);
+  if(bandW < 8) return;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+
+  /* LEFT edge — gradient runs dark → transparent, left to right */
+  ctx.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
+
+  /* RIGHT edge — the same strip mirrored */
+  ctx.save();
+  ctx.translate(VW, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
+  ctx.restore();
+
   ctx.restore();
 }
 
@@ -2495,6 +3522,52 @@ function drawVignette(){
   ctx.restore();
 }
 
+/* =========================================================
+   TOP & BOTTOM SHADE
+   ---------------------------------------------------------
+   The vignette darkens the corners, but the top and bottom of the
+   frame stayed flat, which made the sky look like a painted band
+   rather than depth. Two thin gradients — a cool one at the top
+   (distance) and a warm one at the bottom (the ground falling
+   away) — give the frame a cinematic edge without hiding
+   anything the player needs to see.
+   ========================================================= */
+const shadeCv = document.createElement('canvas');
+const shadeCx = shadeCv.getContext('2d');
+let shadeW = -1, shadeH = -1;
+
+function buildShade(w, h){
+  shadeCv.width  = Math.max(1, Math.round(w));
+  shadeCv.height = Math.max(1, Math.round(h));
+  shadeCx.clearRect(0, 0, w, h);
+
+  /* top — a cool haze, as if the sky recedes */
+  const topH = Math.round(h * 0.20);
+  const gt = shadeCx.createLinearGradient(0, 0, 0, topH);
+  gt.addColorStop(0, 'rgba(6,4,14,0.55)');
+  gt.addColorStop(1, 'rgba(6,4,14,0)');
+  shadeCx.fillStyle = gt;
+  shadeCx.fillRect(0, 0, w, topH);
+
+  /* bottom — a warm shadow where the floor drops away */
+  const botH = Math.round(h * 0.16);
+  const gb = shadeCx.createLinearGradient(0, h - botH, 0, h);
+  gb.addColorStop(0, 'rgba(8,3,2,0)');
+  gb.addColorStop(1, 'rgba(8,3,2,0.50)');
+  shadeCx.fillStyle = gb;
+  shadeCx.fillRect(0, h - botH, w, botH);
+
+  shadeW = w; shadeH = h;
+}
+
+function drawShade(){
+  if(shadeW !== VW || shadeH !== VH) buildShade(VW, VH);
+  ctx.save();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.drawImage(shadeCv, 0, 0, VW, VH);
+  ctx.restore();
+}
+
 /* apply the world->screen transform for gameplay drawing */
 function worldTransform(){
   ctx.setTransform(DPR*SCALE,0,0,DPR*SCALE,0,0);
@@ -2505,7 +3578,17 @@ function screenTransform(){
 
 /* ---------------- menu ambience ---------------- */
 const menuMotes=[];
-for(let i=0;i<70;i++) menuMotes.push({x:Math.random()*VW,y:Math.random()*VH,r:rnd(.6,2.4),sp:rnd(6,26),ph:rnd(0,7)});
+/* the menu ambience is seeded too — the same dust drifts every time the
+   menu opens, instead of a new random sky on every reload */
+(function buildMenuMotes(){
+  const mr = (typeof seedRand === 'function') ? seedRand(0x4D454E55) : Math.random;
+  for(let i=0;i<70;i++){
+    menuMotes.push({
+      x: mr()*VW, y: mr()*VH,
+      r: .6 + mr()*1.8, sp: 6 + mr()*20, ph: mr()*7
+    });
+  }
+})();
 
 function renderMenu(dt){
   const g=ctx.createLinearGradient(0,0,VW*.35,VH);
@@ -2608,6 +3691,24 @@ function render(dt){
     if(cur.lavas) for(let i=0;i<cur.lavas.length;i++){ const l=cur.lavas[i]; if(vis(l)) drawLava(l,W); }
     if(cur.crumbs) for(let i=0;i<cur.crumbs.length;i++){ const c=cur.crumbs[i]; if(c.alive && vis(c)) drawCrumb(c,W); }
     for(let i=0;i<cur.spikes.length;i++){ const s=cur.spikes[i]; if(vis(s)) drawSpikes(s,W); }
+    /* =========================================================
+       EVERY HAZARD FAMILY MUST BE PAINTED
+       ---------------------------------------------------------
+       drawNails / drawRiser / drawCrusher all existed but were
+       never called from the render pass, so a level that authored
+       one of those families produced a hazard that could kill the
+       player without ever appearing on screen. A hazard nobody can
+       see is not a hazard, it is a bug.
+       ========================================================= */
+    if(cur.nails) for(let i=0;i<cur.nails.length;i++){
+      const nn=cur.nails[i]; if(nn && vis(nn)) drawNails(nn,W);
+    }
+    if(cur.risers) for(let i=0;i<cur.risers.length;i++){
+      const rs=cur.risers[i]; if(rs && vis(rs)) drawRiser(rs,W);
+    }
+    if(cur.crushers) for(let i=0;i<cur.crushers.length;i++){
+      const cs=cur.crushers[i]; if(cs && vis(cs)) drawCrusher(cs,W);
+    }
     for(let i=0;i<cur.checkpoints.length;i++){ const c=cur.checkpoints[i]; if(c.x>cullL-60 && c.x<cullR+60) drawCheckpoint(c,W); }
     if(cur.goal.x > cullL-200 && cur.goal.x < cullR+200) drawGoal(cur.goal,W);
     for(let i=0;i<cur.gems.length;i++){ const g=cur.gems[i]; if(!g.got && g.x>cullL && g.x<cullR) drawGem(g,W); }
@@ -2615,6 +3716,9 @@ function render(dt){
     drawPlayer(W);
     /* fire is drawn after the player so the flames overlap the spirit */
     if(cur.fires) for(let i=0;i<cur.fires.length;i++){ const f=cur.fires[i]; if(vis(f)) drawFire(f,W); }
+    /* saws are drawn last of all the hazards — a blade in front of the
+       player reads as "this thing can hit you", which is the truth */
+    if(cur.saws) for(let i=0;i<cur.saws.length;i++){ const s=cur.saws[i]; if(s && vis(s)) drawSaw(s,W); }
     drawParticles();
 
     ctx.restore();
@@ -2623,6 +3727,7 @@ function render(dt){
     /* 3) darkness + vignette are screen-space overlays */
     screenTransform();
     drawDarkness(W);
+    drawShade();
     drawVignette();
   } else {
     screenTransform();
@@ -2652,6 +3757,43 @@ const TUT = {
     { key:'oil',   done: () => S.tutOil },
     { key:'goal',  done: () => false }
   ],
+
+  /* =========================================================
+     CONTEXTUAL HAZARD CARDS
+     ---------------------------------------------------------
+     The six steps above are the tutorial: they run once, on the
+     first level, and teach the controls. That is the right shape
+     for controls — a player wants to know how to move before
+     anything else.
+
+     The six hazard cards below are NOT part of that sequence.
+     They fire the first time the player actually SEES a hazard
+     of that family, on any level, at any point in the run. That
+     is the only moment the text is useful: a card explaining
+     saws while the player is looking at a saw. Twelve cards
+     dumped on level 1 would be a wall of text nobody reads.
+
+     Rules:
+       · each card fires at most ONCE, ever (persisted)
+       · it never pauses the game — it is a small card, not a modal
+       · it only fires when the hazard is on screen AND close
+       · the 0.9s delay lets the player see the thing first
+     ========================================================= */
+  hazardSeen: {},          /* key -> true, persisted */
+  hazardQueue: [],         /* cards waiting to be shown */
+  hazardCard: null,        /* the card currently on screen */
+  hazardTimer: 0,
+
+  /* which hazard family each card belongs to, and how to detect
+     that the player is looking at one */
+  hazardDefs: [
+    { key:'spike', probe: function(){ return nearestHazard('spikes'); } },
+    { key:'saw',   probe: function(){ return nearestHazard('saws');   } },
+    { key:'nail',  probe: function(){ return nearestHazard('nails');  } },
+    { key:'riser', probe: function(){ return nearestHazard('risers'); } },
+    { key:'crush', probe: function(){ return nearestHazard('crushers'); } },
+    { key:'crumb', probe: function(){ return nearestHazard('crumbs'); } }
+  ],
   init(){
     this.root   = qs('#tut');
     if(!this.root) return;
@@ -2664,8 +3806,35 @@ const TUT = {
     this.nextEl  = qs('#tut-next');
 
     qs('#tut-skip').addEventListener('click', () => {
-      AU.click(); this.hide(true);
+      AU.click();
+      /* a hazard card is dismissed on its own terms — the skip
+         button belongs to the controls tutorial only */
+      if(this.hazardCard){ hideHazardCard(); return; }
+      this.hide(true);
     });
+
+    /* tapping the card itself dismisses a hazard card early */
+    if(this.root){
+      this.root.addEventListener('click', (e)=>{
+        if(!this.hazardCard) return;
+        if(e.target && e.target.id === 'tut-skip') return;
+        hideHazardCard();
+      });
+    }
+
+    /* =========================================================
+       RESTORE WHAT THE PLAYER HAS ALREADY BEEN TAUGHT
+       ---------------------------------------------------------
+       `save.tutorialSeen` is a flat map of hazard keys the player
+       has already met. Restoring it here means a returning player
+       is never shown the saw card again on level 12 — the cards
+       are a first-encounter device, not a nag.
+       ========================================================= */
+    const seen = save.tutorialSeen || {};
+    for(let i=0;i<this.hazardDefs.length;i++){
+      const k = this.hazardDefs[i].key;
+      if(seen[k]) this.hazardSeen[k] = true;
+    }
 
     /* Manual navigation. The card used to advance only when the
        player performed the action, which meant a step could never
@@ -2731,11 +3900,147 @@ const TUT = {
     AU.tone(760,.07,'sine',.05);
   },
   update(){
+    /* ---- the hazard cards run independently of the sequence ---- */
+    this.updateHazardCards();
+
     if(!this.active) return;
     const s = this.steps[this.step];
     if(s && s.done()) this.advance();
+  },
+
+  /* =========================================================
+     HAZARD CARD DRIVER
+     ---------------------------------------------------------
+     Runs every frame, whether or not the main tutorial is active.
+
+     Order of business:
+       1. tick down the card currently on screen, dismiss it
+       2. if the main tutorial is running, do not interrupt it
+       3. scan the six families; queue any the player has not
+          met yet and can currently see
+       4. show the first queued card after a short delay
+     ========================================================= */
+  updateHazardCards(){
+    /* 1 · the card on screen */
+    if(this.hazardCard){
+      this.hazardTimer -= 1/60;
+      if(this.hazardTimer <= 0) hideHazardCard();
+      return;
+    }
+
+    /* 2 · never talk over the controls tutorial */
+    if(this.active) return;
+    if(!cur || S.finished || S.paused) return;
+
+    /* 3 · scan for a family the player has not met yet */
+    for(let i=0;i<this.hazardDefs.length;i++){
+      const def = this.hazardDefs[i];
+      if(this.hazardSeen[def.key]) continue;
+      if(!def.probe()) continue;
+
+      /* mark it seen immediately so it can never queue twice */
+      this.hazardSeen[def.key] = true;
+      save.tutorialSeen = save.tutorialSeen || {};
+      save.tutorialSeen[def.key] = 1;
+      persist();
+
+      this.hazardQueue.push(def.key);
+      break;                       /* one per frame — no stampede */
+    }
+
+    /* 4 · show the next one after a beat */
+    if(this.hazardQueue.length){
+      this.hazardDelay = (this.hazardDelay || 0) + 1/60;
+      if(this.hazardDelay >= 0.9){
+        this.hazardDelay = 0;
+        showHazardCard(this.hazardQueue.shift());
+      }
+    } else {
+      this.hazardDelay = 0;
+    }
   }
 };
+
+/* =========================================================
+   NEAREST HAZARD — "is the player looking at one of these?"
+   ---------------------------------------------------------
+   A card should only appear when the hazard is genuinely in
+   front of the player: inside the camera window, and within
+   about a screen-and-a-half of the player's x. Anything further
+   away is a spoiler, and anything behind the player is noise.
+
+   Returns true/false rather than the object — the caller only
+   needs to know whether to fire the card.
+   ========================================================= */
+function nearestHazard(kind){
+  if(!cur) return false;
+  const arr = cur[kind];
+  if(!arr || !arr.length) return false;
+
+  const px = P.x + P.w/2;
+  const ahead = 620;          /* roughly 1.5 screens of lead time */
+  const behind = 180;
+
+  for(let i=0;i<arr.length;i++){
+    const o = arr[i];
+    if(!o) continue;
+    /* a dead or buried hazard is not "there" yet */
+    if(kind === 'crumbs'  && !o.alive) continue;
+    if(kind === 'risers'  && o.state === 'gone') continue;
+
+    const ox = (o.x !== undefined) ? o.x : 0;
+    const ow = (o.w !== undefined) ? o.w : (o.r ? o.r*2 : 0);
+    const cx = ox + ow/2;
+
+    if(cx > px - behind && cx < px + ahead) return true;
+  }
+  return false;
+}
+
+/* =========================================================
+   HAZARD CARD — show one, once, without stopping the game.
+   ---------------------------------------------------------
+   The card reuses the tutorial's DOM node but not its sequence:
+   it sets its own title/body, hides the dots and the arrows, and
+   auto-dismisses after a few seconds. The player can dismiss it
+   early by tapping it, but nothing forces them to.
+   ========================================================= */
+function showHazardCard(key){
+  if(!TUT.root) return;
+  if(TUT.hazardCard) return;              /* one at a time */
+
+  TUT.hazardCard = key;
+  TUT.hazardTimer = 7.0;                  /* seconds on screen */
+
+  TUT.titleEl.textContent = t('tut.'+key+'.title');
+  TUT.bodyEl.textContent  = t('tut.'+key+'.body');
+  if(TUT.hintEl) TUT.hintEl.textContent = '';
+
+  /* the sequence chrome does not belong on a hazard card */
+  if(TUT.dotsEl) TUT.dotsEl.innerHTML = '';
+  if(TUT.prevEl) TUT.prevEl.disabled = true;
+  if(TUT.nextEl) TUT.nextEl.disabled = true;
+  if(TUT.scrollEl) TUT.scrollEl.scrollTop = 0;
+
+  TUT.root.hidden = false;
+  TUT.root.classList.add('show');
+  TUT.root.classList.add('hazard');
+  AU.tone(700,.09,'sine',.06);
+}
+
+function hideHazardCard(){
+  if(!TUT.hazardCard) return;
+  TUT.hazardCard = null;
+  TUT.hazardTimer = 0;
+  if(TUT.root){
+    TUT.root.classList.remove('hazard');
+    /* only fully hide if the real tutorial is not running */
+    if(!TUT.active){
+      TUT.root.classList.remove('show');
+      TUT.root.hidden = true;
+    }
+  }
+}
 
 /* updateHUD runs every frame. Writing textContent/style every frame
    forces the browser to re-layout 60x per second. These caches skip
@@ -2789,6 +4094,11 @@ function showHud(){
 
 function startLevel(i){
   loadLevel(i);
+  /* a hazard card from the previous level must not follow the
+     player into this one */
+  hideHazardCard();
+  TUT.hazardQueue = [];
+  TUT.hazardDelay = 0;
   S.screen='play'; S.playing=true; S.paused=false;
   qa('.screen').forEach(s=>s.classList.remove('active'));
   qs('#ov-pause').hidden=true;
@@ -2999,15 +4309,81 @@ function togglePause(){
 
 /* =========================================================
    SERVICE WORKER — what makes the game installable and offline.
-   Registered after `load` so it never competes with the first
-   paint. Failures are swallowed: the game works fine without it,
-   it just cannot be installed.
+   ---------------------------------------------------------
+   Three conditions must ALL hold before a browser will treat the
+   game as an installable app:
+
+     1. a SECURE CONTEXT — https, or localhost. A service worker
+        will not register over http:// or from file://.
+     2. a registered service worker with a fetch handler.
+     3. a manifest with a name, a start_url, icons of at least
+        192px, and a display mode of standalone or fullscreen.
+
+   If any one of them is missing, the game still runs perfectly —
+   it just opens in a browser tab, which is the exact symptom of
+   "it behaves like a website, not an app".
+
+   This block registers the worker AND reports, in the console,
+   which of the three is failing. Without that report the failure
+   is invisible: the game looks fine and simply refuses to
+   install, with no clue why.
    ========================================================= */
-if('serviceWorker' in navigator && location.protocol !== 'file:'){
+(function setupPWA(){
+  const secure = (location.protocol === 'https:' ||
+                  location.hostname === 'localhost' ||
+                  location.hostname === '127.0.0.1');
+
+  if(!secure){
+    console.warn(
+      '[qandil] Not a secure context (' + location.protocol + ').\n' +
+      'A service worker cannot register, so the game will NOT be installable.\n' +
+      'Serve it over https, or run a local server (python3 -m http.server) and ' +
+      'open http://localhost:8000.'
+    );
+    return;
+  }
+
+  if(!('serviceWorker' in navigator)){
+    console.warn('[qandil] This browser has no Service Worker support — no install.');
+    return;
+  }
+
   window.addEventListener('load', function(){
-    navigator.serviceWorker.register('sw.js').catch(function(){ /* no PWA, no problem */ });
+    navigator.serviceWorker.register('sw.js')
+      .then(function(reg){
+        console.log('[qandil] service worker registered, scope:', reg.scope);
+
+        /* a waiting worker means a new build is ready but the old
+           one is still in control. Tell it to take over. */
+        if(reg.waiting){
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        reg.addEventListener('updatefound', function(){
+          const sw = reg.installing;
+          if(!sw) return;
+          sw.addEventListener('statechange', function(){
+            if(sw.state === 'installed' && navigator.serviceWorker.controller){
+              sw.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+      })
+      .catch(function(err){
+        console.error('[qandil] service worker FAILED to register:', err);
+      });
   });
-}
+
+  /* Reload once when a new worker takes control, so the page is
+     never left running a build whose cache has been retired. */
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    if(reloaded) return;
+    reloaded = true;
+    /* only reload if there was already a controller — the very
+       first install should not bounce the page */
+    if(navigator.serviceWorker.controller) location.reload();
+  });
+})();
 
 /* ---------------- buttons ---------------- */
 qs('#btn-play').addEventListener('click', function(){

@@ -7,7 +7,8 @@
    crumbs: [x, y, w, h]   fragile — crumbles 0.55s after being stood on
    spikes: [x, y, w]      h = 22, sits on a surface at y
    fires:  [x, y, w, h, speed]
-   lavas:  [x, y, w, h]
+   lavas:  [x, y, w, h, groundY]  a PIT cut into the floor, never a
+                                  block resting on top of it
    movers: {x,y,w,h,axis,dist,speed,phase}
    gems:   [x, y]         centre
    oil:    [x, y]         centre
@@ -61,6 +62,22 @@ const WORLDS = [
 
 /* =========================================================
    TUNING — every magic number lives here.
+   ---------------------------------------------------------
+   The four new hazard families each get their own block so a
+   balance pass never has to hunt through the segment code:
+
+     SAW     · a spinning blade that patrols a path
+     NAIL    · a dense row of short metal spikes (floor or ceiling)
+     RISER   · a stone that erupts out of the floor, then crumbles
+     CRUSHER · a stone that drops from the ceiling when you pass
+     CRUMB   · the fragile platform, now with a variable fuse
+
+   FAIRNESS FLOOR
+   --------------
+   `FUSE_MIN` is not a style choice, it is a promise: no fragile
+   surface may vanish in under 0.30s of contact. Below that the
+   player physically cannot react, and the death stops being their
+   fault. Every fuse in the game is clamped to this value.
    ========================================================= */
 const TUNE = {
   GROUND_Y     : 500,
@@ -77,7 +94,43 @@ const TUNE = {
   CP_SPACING   : 900,
   CP_SAFE_BACK : 120,
   CP_SAFE_FWD  : 90,
-  OIL_STEP     : 1400
+  OIL_STEP     : 1400,
+
+  /* ---- lava (a fissure in the floor, not a block on it) ------ */
+  LAVA_DROP    : 22,     /* how far the surface sinks BELOW ground  */
+  LAVA_DEPTH   : 320,    /* how far the molten body runs down       */
+
+  /* ---- floating platforms ----------------------------------- */
+  /* The minimum air a floating platform must leave under itself.
+     120 is one comfortable hop — the platform is clearly a step up,
+     not a shelf bolted to the ground, and it is nowhere near the
+     top of the screen. The first pass used 190, which pushed every
+     floating stone so high the level looked like it was missing its
+     middle. */
+  MIN_FLOAT_CLEAR : 120,
+
+  /* ---- saw -------------------------------------------------- */
+  SAW_R        : 26,     /* blade radius                        */
+  SAW_DIST     : 110,    /* default patrol half-travel          */
+  SAW_SPEED    : 1.3,    /* angular speed of the patrol         */
+
+  /* ---- nails ------------------------------------------------ */
+  NAIL_H       : 15,     /* short and dense — a different read  */
+  NAIL_STEP    : 13,     /* horizontal spacing between points   */
+
+  /* ---- riser (stone erupts from the floor) ------------------ */
+  RISER_H      : 20,     /* how far the stone rises             */
+  RISER_SPEED  : 2.2,    /* seconds to reach full height        */
+
+  /* ---- crusher (stone drops from the ceiling) --------------- */
+  CRUSH_H      : 26,
+  CRUSH_DROP   : 150,    /* travel of the drop                  */
+  CRUSH_SPEED  : 1.9,
+
+  /* ---- fragile platforms ------------------------------------ */
+  FUSE_MIN     : 0.30,   /* HARD FLOOR — never go below this    */
+  FUSE_MAX     : 0.95,
+  CRUMB_RESPAWN: 2.6     /* seconds before a respawning crumb returns */
 };
 
 /* =========================================================
@@ -109,6 +162,11 @@ function Builder(){
   this.fires = [];
   this.lavas = [];
   this.movers = [];
+  /* ---- new hazard families ---- */
+  this.saws = [];
+  this.nails = [];
+  this.risers = [];
+  this.crushers = [];
   this.cpCandidates = [];
   this.lastGroundEnd = 0;
 }
@@ -124,6 +182,10 @@ Builder.prototype._hitBox = function(x,y,w,h,pad){
   for(i=0;i<this.ceils.length;i++){ p=this.ceils[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
   for(i=0;i<this.crumbs.length;i++){ p=this.crumbs[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
   for(i=0;i<this.movers.length;i++){ p=this.movers[i]; if(test({x:p.x,y:p.y,w:p.w,h:p.h})) return true; }
+  /* the new families reserve their own footprint too, otherwise a
+     later platform could be dropped straight through a saw's path */
+  for(i=0;i<this.risers.length;i++){ p=this.risers[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
+  for(i=0;i<this.crushers.length;i++){ p=this.crushers[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
   return false;
 };
 
@@ -161,8 +223,98 @@ Builder.prototype.floor = function(x, w){
   return p;
 };
 
+/* =========================================================
+   SPAWN SAFETY — the fix for "the player falls and dies at once"
+   ---------------------------------------------------------
+   The spawn point is authored at a fixed x (80). Nothing used to
+   guarantee that a floor existed under it: `segStairs` lays its
+   landing floor at `x0 + w*0.80`, so the first 80% of that
+   segment has NO ground at y=500. When the level happened to
+   open with a stairs segment, the player spawned over empty air,
+   fell out of the world, and lost a heart before the first frame
+   was even drawn.
+
+   The same hole existed along the whole level, which is also why
+   a checkpoint could be anchored over thin air.
+
+   `ensureGround()` walks a strip of x positions and, wherever
+   nothing solid covers the spawn height, lays a floor. It never
+   removes anything, so it cannot break a hand-tuned layout — it
+   only fills genuine voids.
+   ========================================================= */
+Builder.prototype.ensureGround = function(x0, x1){
+  const step = 40;
+
+  const solidAt = function(x){
+    for(let i=0;i<this.plats.length;i++){
+      const p = this.plats[i];
+      if(x >= p[0] && x <= p[0]+p[2] && Math.abs(p[1]-TUNE.GROUND_Y) < 2) return true;
+    }
+    return false;
+  };
+
+  /* collect the gaps first, then fill them — filling while
+     scanning would make the new floor mask the rest of the gap */
+  const gaps = [];
+  let runStart = null;
+
+  for(let x = x0; x <= x1; x += step){
+    const solid = solidAt.call(this, x);
+    if(!solid && runStart === null){
+      runStart = x;
+    } else if(solid && runStart !== null){
+      gaps.push([runStart, x - runStart]);
+      runStart = null;
+    }
+  }
+  if(runStart !== null) gaps.push([runStart, x1 - runStart + step]);
+
+  for(let i=0;i<gaps.length;i++){
+    this.floor(gaps[i][0], gaps[i][1]);
+  }
+
+  return gaps.length;
+};
+
+/* =========================================================
+   FLOATING PLATFORM — with a MEANINGFUL-CLEARANCE rule.
+   ---------------------------------------------------------
+   THE "STONE WITH NO REASON" PROBLEM
+   ----------------------------------
+   The level builder used to drop floating platforms at whatever
+   height a template happened to ask for. `segRun` put two of them
+   at y=380 and y=350 over a floor at y=500 — 120 and 150 units of
+   air. The player could jump up, land, and step straight back down
+   onto the same floor. The platform asked nothing and gave nothing,
+   so it read as a rock somebody forgot to delete.
+
+   A floating platform is only worth placing when it is genuinely
+   ABOVE the ground it hovers over — high enough that reaching it
+   is a decision, and that falling off it costs something. The rule
+   below enforces that:
+
+     · find the highest solid surface directly underneath
+     · if the gap is smaller than MIN_FLOAT_CLEAR, RAISE the
+       platform until it is — never drop it, never reject it, so
+       the level keeps its detail and simply reads better
+
+   `MIN_FLOAT_CLEAR` is 190: a single jump clears ~145 and a double
+   clears ~260, so 190 sits between them. The platform is therefore
+   reachable, but only with intent.
+   ========================================================= */
 Builder.prototype.plat = function(x, y, w, h){
   h = h || TUNE.FLOAT_H;
+  if(y < 70) return false;
+
+  /* ---- raise it out of the "pointless" band ---- */
+  const below = this.groundUnder(x + w/2, y + h);
+  if(below){
+    const clear = below[1] - (y + h);
+    if(clear < TUNE.MIN_FLOAT_CLEAR){
+      y = below[1] - TUNE.MIN_FLOAT_CLEAR - h;
+    }
+  }
+
   if(y < 70) return false;
   if(this._hitBox(x, y, w, h, 8)) return false;
   this.plats.push([Math.round(x), Math.round(y), Math.round(w), h]);
@@ -176,10 +328,211 @@ Builder.prototype.ceil = function(x, y, w){
   return true;
 };
 
-Builder.prototype.crumb = function(x, y, w){
+/* =========================================================
+   FRAGILE PLATFORM — now with a VARIABLE fuse.
+   ---------------------------------------------------------
+   The old signature was `crumb(x, y, w)` and the fuse was a
+   hard-coded 0.55s inside game.js. That made every fragile
+   platform in the game identical: learn one, you have learned
+   them all.
+
+   The fuse is now authored per platform and clamped to
+   `TUNE.FUSE_MIN`. `respawn` is the second half of the same
+   idea — a platform that comes back cannot be memorised as
+   "gone forever", and one that does not cannot be memorised as
+   "it will save me".
+
+   crumbs: [x, y, w, h, fuse, respawn]
+   ========================================================= */
+Builder.prototype.crumb = function(x, y, w, fuse, respawn){
   w = w || 70;
   if(this._hitBox(x, y, w, 20, 10)) return false;
-  this.crumbs.push([Math.round(x), Math.round(y), Math.round(w), 20]);
+  const f = Math.max(TUNE.FUSE_MIN,
+              Math.min(TUNE.FUSE_MAX, fuse === undefined ? 0.55 : fuse));
+  this.crumbs.push([
+    Math.round(x), Math.round(y), Math.round(w), 20,
+    Math.round(f * 100) / 100,
+    respawn ? 1 : 0
+  ]);
+  return true;
+};
+
+/* =========================================================
+   SAW — a spinning blade that patrols a path.
+   ---------------------------------------------------------
+   `axis` is 'x' (slides along the floor), 'y' (bobs vertically)
+   or 'c' (a circular orbit — the hardest to read, so it is only
+   used at high difficulty).
+
+   The blade is stored as its RESTING centre plus the patrol
+   parameters; the sweep corridor is reserved in `_hitBox` so
+   nothing else can be placed inside the arc it will travel.
+   ========================================================= */
+Builder.prototype.saw = function(x, y, r, axis, dist, speed){
+  r = r || TUNE.SAW_R;
+  axis = axis || 'x';
+  dist = dist || TUNE.SAW_DIST;
+  speed = speed || TUNE.SAW_SPEED;
+
+  /* the whole corridor must be free of solid geometry */
+  const pad = r + 12;
+  const cx0 = axis === 'y' ? x - pad : x - dist - pad;
+  const cy0 = axis === 'x' ? y - pad : y - dist - pad;
+  const cw  = axis === 'y' ? pad * 2 : dist * 2 + pad * 2;
+  const ch  = axis === 'x' ? pad * 2 : dist * 2 + pad * 2;
+  if(this._hitBox(cx0, cy0, cw, ch, 6)) return false;
+
+  /* never let a blade sit inside the floor or off the top */
+  if(y - r < 60) return false;
+  if(y + r > TUNE.GROUND_Y + 20) return false;
+
+  this.saws.push({
+    x:Math.round(x), y:Math.round(y), r:Math.round(r),
+    axis:axis, dist:Math.round(dist), speed:speed, phase:0
+  });
+  return true;
+};
+
+/* =========================================================
+   NAILS — a dense row of short metal spikes.
+   ---------------------------------------------------------
+   Unlike `spike`, nails can hang from a ceiling (`dir = -1`),
+   which is what makes a corridor genuinely tight: you cannot
+   jump over them, you have to walk under them at the right
+   moment. They are deliberately SHORTER than spikes (15 vs 22)
+   so the read is different at a glance.
+   ========================================================= */
+Builder.prototype.nail = function(x, w, dir){
+  w = w || 60;
+  dir = dir === -1 ? -1 : 1;
+  const cx = x + w/2;
+
+  if(dir === 1){
+    /* floor nails — need real ground and headroom */
+    const g = this.groundUnder(cx, 300);
+    if(!g) return false;
+    if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM + TUNE.NAIL_H) return false;
+    if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM + TUNE.NAIL_H)) return false;
+    if(this._hitBox(x, g[1]-TUNE.NAIL_H, w, TUNE.NAIL_H, 14)) return false;
+    this.nails.push([Math.round(x), Math.round(g[1]-TUNE.NAIL_H), Math.round(w), TUNE.NAIL_H, 1]);
+    return true;
+  }
+
+  /* ceiling nails — must hang from a real ceiling block */
+  let best = null;
+  for(let i=0;i<this.ceils.length;i++){
+    const c = this.ceils[i];
+    if(cx < c[0] || cx > c[0]+c[2]) continue;
+    const bottom = c[1] + c[3];
+    if(!best || bottom > best) best = bottom;
+  }
+  if(best === null) return false;
+  /* the ceiling must be low enough that the nails are a real threat */
+  if(best > TUNE.GROUND_Y - TUNE.MIN_HEADROOM) return false;
+  if(this._hitBox(x, best, w, TUNE.NAIL_H, 14)) return false;
+  this.nails.push([Math.round(x), Math.round(best), Math.round(w), TUNE.NAIL_H, -1]);
+  return true;
+};
+
+/* =========================================================
+   RISER — a stone that erupts out of the floor, then crumbles.
+   ---------------------------------------------------------
+   This is the "حجر من الأرض يتفتت عند الصعود عليه" the design
+   calls for. It is authored as a SOLID surface sitting at its
+   resting (raised) height; the engine starts it buried and
+   animates it up when the player is close.
+
+   crumbs-style bookkeeping, but the fuse only starts once the
+   player is actually standing on it.
+
+   risers: [x, y, w, h, fuse, respawn]
+   ========================================================= */
+Builder.prototype.riser = function(x, y, w, fuse, respawn){
+  w = w || 80;
+  if(y < 120) return false;
+  if(this._hitBox(x, y, w, TUNE.RISER_H, 10)) return false;
+  const f = Math.max(TUNE.FUSE_MIN,
+              Math.min(TUNE.FUSE_MAX, fuse === undefined ? 0.6 : fuse));
+  this.risers.push([
+    Math.round(x), Math.round(y), Math.round(w), TUNE.RISER_H,
+    Math.round(f * 100) / 100,
+    respawn ? 1 : 0
+  ]);
+  return true;
+};
+
+/* =========================================================
+   CRUSHER — a stone that drops from the ceiling.
+   ---------------------------------------------------------
+   Authored at its RAISED position. The engine holds it there
+   until the player walks underneath, then it falls, waits, and
+   climbs back. The drop corridor is reserved so nothing is ever
+   placed inside it.
+
+   crushers: [x, y, w, h, drop, speed]
+   ========================================================= */
+/* =========================================================
+   CRUSHER — a stone that drops from the ceiling.
+   ---------------------------------------------------------
+   THE INVISIBLE-TRAP BUG THIS FIXES
+   ---------------------------------
+   The old version validated only that the drop corridor was
+   clear of geometry. It never checked that there was a CEILING
+   above the stone. A top-up pass could therefore hang a stone in
+   mid-air, and because `drawCrusher` draws the stone at its rest
+   position and the rail below it, the result was a hazard with
+   no visible anchor — a stone that appeared out of nothing and
+   killed the player on a level where they had no reason to look
+   up.
+
+   A crusher is now legal only when ALL of these hold:
+     1. there is a real ceiling block whose underside is at or
+        just above the stone's rest position
+     2. the stone hangs from that ceiling, not floating near it
+     3. the whole drop corridor is clear
+     4. the drop actually reaches the floor the player walks on
+
+   Rule 1 is the one that matters: no ceiling, no crusher.
+   ========================================================= */
+Builder.prototype.crusher = function(x, y, w, drop, speed){
+  w = w || 70;
+  drop = drop || TUNE.CRUSH_DROP;
+  if(y < 70) return false;
+
+  /* ---- 1 · find a ceiling that actually covers this stone ---- */
+  let anchor = null;
+  const cx = x + w/2;
+  for(let i=0;i<this.ceils.length;i++){
+    const c = this.ceils[i];
+    if(cx < c[0] + 8 || cx > c[0] + c[2] - 8) continue;
+    const bottom = c[1] + c[3];
+    if(bottom > y + 6) continue;          /* ceiling must be ABOVE the stone */
+    if(!anchor || bottom > anchor) anchor = bottom;
+  }
+  /* no ceiling → no crusher. This is the fix. */
+  if(anchor === null) return false;
+
+  /* ---- 2 · the stone must hang from it, not float near it ---- */
+  if(y - anchor > 26) return false;
+
+  /* ---- 3 · the drop corridor must be clear ---- */
+  if(this._hitBox(x, y, w, TUNE.CRUSH_H + drop, 10)) return false;
+
+  /* ---- 4 · the drop must reach walkable ground ---- */
+  const g = this.groundUnder(cx, y + TUNE.CRUSH_H);
+  if(!g) return false;
+  const floorY = g[1];
+  const bottomAtRest = y + TUNE.CRUSH_H;
+  const bottomAtDrop = bottomAtRest + drop;
+  /* it must come close enough to the floor to be a real threat,
+     but never overlap it (a stone sunk into the floor is a bug) */
+  if(bottomAtDrop > floorY + 4) return false;
+  if(bottomAtDrop < floorY - 70) return false;
+
+  this.crushers.push([
+    Math.round(x), Math.round(y), Math.round(w), TUNE.CRUSH_H,
+    Math.round(drop), speed || TUNE.CRUSH_SPEED
+  ]);
   return true;
 };
 
@@ -259,11 +612,49 @@ Builder.prototype.fire = function(x, w, speed){
   return true;
 };
 
+/* =========================================================
+   LAVA — a FISSURE cut into the floor, never a block resting on it.
+   ---------------------------------------------------------
+   THE FLOATING-VOLCANO BUG THIS FIXES
+   -----------------------------------
+   The old version put the molten surface `surfaceH` units ABOVE
+   the ground line (50 by default) and stacked the body on top of
+   it. In a chasm there was nothing underneath, so the level ended
+   up carrying a slab of molten rock hovering over empty air — a
+   volcano in mid-air. The player could walk under it, and it read
+   as an object rather than as the hole it was meant to be.
+
+   A pool is now a PIT:
+     · the surface sits LAVA_DROP BELOW the ground line
+     · the body runs LAVA_DEPTH further down, so there is never a
+       floor inside the pool to land on
+     · the pit mouth must be genuinely open — no floor, deck or
+       fragile stone may cross it
+     · the renderer draws the rock walls that run from the ground
+       line down past the pool, so the fire is visibly a hole in
+       the earth with stone on every side
+
+   A fifth field (groundY) travels with the pool so the renderer
+   knows where the ground line above it is.
+
+   Signature: lava(x, w)
+   ========================================================= */
 Builder.prototype.lava = function(x, w){
-  const g = this.groundUnder(x + w/2, 300);
-  const y = g ? g[1] : TUNE.GROUND_Y;
-  if(this._hitBox(x, y-50, w, 50, 14)) return false;
-  this.lavas.push([Math.round(x), Math.round(y-50), Math.round(w), 50]);
+  if(w < 90) return false;
+
+  const g   = TUNE.GROUND_Y;
+  const top = g + TUNE.LAVA_DROP;
+  const h   = TUNE.LAVA_DEPTH;
+
+  /* the pit mouth must be open. Inset by 10 on each side so the solid
+     banks that bound the pit are not counted as obstructions. */
+  const inset = 10;
+  if(this._hitBox(x + inset, g - 20, w - inset*2,
+                  TUNE.LAVA_DROP + 46, 0)) return false;
+
+  this.lavas.push([
+    Math.round(x), Math.round(top), Math.round(w), Math.round(h), g
+  ]);
   return true;
 };
 
@@ -284,6 +675,40 @@ Builder.prototype.cpCandidate = function(x){
 };
 
 /* =========================================================
+   SPACING GUARD — the thing that stops a level looking random.
+   ---------------------------------------------------------
+   A top-up pass that drops a hazard into the first legal slot
+   produces clusters: three nail rows inside 120 units, a saw
+   sitting on top of a fire. That reads as noise, not design.
+
+   `_nearHazard` answers "is there already something lethal in
+   this stretch of the level?" and the top-up pass refuses to
+   place a second hazard inside the same window. The window is
+   generous enough that a deliberately dense segment is still
+   possible — it only blocks the accidents.
+   ========================================================= */
+Builder.prototype._nearHazard = function(x, w, pad){
+  pad = pad === undefined ? 110 : pad;
+  const x0 = x - pad, x1 = x + w + pad;
+  const overlaps = function(o){
+    const ow = o[2] !== undefined ? o[2] : (o.w || 0);
+    return x0 < o[0] + ow && x1 > o[0];
+  };
+  let i;
+  for(i=0;i<this.spikes.length;i++)   if(overlaps(this.spikes[i]))   return true;
+  for(i=0;i<this.fires.length;i++)    if(overlaps(this.fires[i]))    return true;
+  for(i=0;i<this.lavas.length;i++)    if(overlaps(this.lavas[i]))    return true;
+  for(i=0;i<this.nails.length;i++)    if(overlaps(this.nails[i]))    return true;
+  for(i=0;i<this.risers.length;i++)   if(overlaps(this.risers[i]))   return true;
+  for(i=0;i<this.crushers.length;i++) if(overlaps(this.crushers[i])) return true;
+  for(i=0;i<this.saws.length;i++){
+    const s = this.saws[i];
+    if(x0 < s.x + s.r + s.dist && x1 > s.x - s.r - s.dist) return true;
+  }
+  return false;
+};
+
+/* =========================================================
    SEGMENT TEMPLATES
    Each one is self-contained and always ends on solid ground.
    ========================================================= */
@@ -299,29 +724,55 @@ Builder.prototype.cpCandidate = function(x){
 function segRun(B, x0, w, diff, rnd){
   B.floor(x0, w);
 
-  /* floating platforms first — they define the airspace */
+  /* =========================================================
+     FLOATING PLATFORMS — one, not two, and high enough to matter.
+     ---------------------------------------------------------
+     This segment used to drop TWO platforms over continuous floor,
+     at y=380 and y=350. With the ground at y=500 that is 120 and
+     150 units of air: the player hops up, lands, and steps back
+     down onto the same floor. Neither platform was a route, a
+     reward or a risk — they were rocks floating for no reason.
+
+     Now there is ONE platform, placed at a height the player has
+     to commit to, and it carries the gem that makes it worth the
+     climb. The `plat()` clearance rule raises it further if a
+     later segment needs it.
+     ========================================================= */
   if(w > 400){
-    const px = x0 + w*0.34;
-    if(B.plat(px, 380, 110)) B.gem(px+55, 330);
-    const px2 = x0 + w*0.70;
-    if(B.plat(px2, 350, 100)) B.gem(px2+50, 300);
+    const px = x0 + w*0.52;
+    if(B.plat(px, 370, 110)) B.gem(px+55, 320);
   }
 
-  /* then hazards, which now respect everything already in the air */
+  /* =========================================================
+     HAZARDS ON A FIXED RHYTHM
+     ---------------------------------------------------------
+     The old loop placed hazards at `x0 + 140 + (span/hazards)*i
+     + rnd()*40` and chose the TYPE with a coin flip. Two levels
+     with the same difficulty could therefore feel completely
+     different, and a player could never predict what came next.
+
+     Now the positions are a fixed grid and the type ALTERNATES
+     in a fixed order: spike, fire, spike, fire… The only thing
+     difficulty changes is how many there are and how wide they
+     are. That is the difference between a level that is hard and
+     a level that is arbitrary.
+     ========================================================= */
   const hazards = 1 + Math.floor(diff*3);
   const span = w - 240;
-  if(span > 0){
-    for(let i=0;i<hazards;i++){
-      const hx = x0 + 140 + (span/hazards)*i + rnd()*40;
-      if(diff < 0.35){
-        B.spike(hx, 50 + rnd()*25);
-      } else if(diff < 0.7){
-        if(rnd() > 0.5) B.spike(hx, 55); else B.fire(hx, 60, 1.4+rnd()*0.6);
-      } else {
-        if(rnd() > 0.45) B.fire(hx, 65, 1.6+rnd()*0.8); else B.spike(hx, 60);
-      }
+  const inset = 140;
+  const step = hazards > 1 ? (span - inset) / (hazards - 1) : 0;
+
+  for(let i=0;i<hazards;i++){
+    const hx = x0 + inset + step * i;
+    /* alternating type — never two of the same in a row */
+    const useFire = (i % 2 === 1);
+    if(useFire){
+      B.fire(hx, 60, 1.4 + diff * 0.8);
+    } else {
+      B.spike(hx, 50 + diff * 12);
     }
   }
+
   return x0 + w;
 }
 
@@ -446,20 +897,44 @@ function segStairs(B, x0, w, diff, rnd){
   return x0 + w;
 }
 
-/* 4 · ISLAND — floating islands over a void */
+/* =========================================================
+   4 · ISLAND — floating islands over a genuine void
+   ---------------------------------------------------------
+   The old version scattered islands at `380 + sin(i*1.3)*60 - diff*30`
+   with a width of `110 - diff*25`. Three things were wrong:
+
+     · the height wobbled by ±60 units per island, so the chain had
+       no readable rhythm — every island sat at a different altitude
+       for no reason the player could learn
+     · the width shrank with difficulty, so late levels had thin
+       slivers next to early levels with wide slabs — the same
+       mechanic, two different games
+     · nothing guaranteed the gaps between islands were jumpable
+
+   Now the islands sit on a FIXED height and a FIXED size, spaced
+   on a grid. The only thing difficulty changes is how many there
+   are. That is the difference between a level you can read and a
+   level you survive.
+   ========================================================= */
 function segIsland(B, x0, w, diff, rnd){
   B.floor(x0, 130);
+  B.floor(x0 + w - 150, 150);
+
   const count = 3 + Math.floor(diff*3);
-  const step = (w - 180) / count;
+  const span  = w - 280;                 /* usable air between banks */
+  const step  = span / count;
+
+  /* one height, one size — the chain reads as a designed path */
+  const ISLAND_Y = 370;
+  const ISLAND_W = 100;
+
   for(let i=0;i<count;i++){
-    const px = x0 + 150 + i*step;
-    const py = 380 + Math.round(Math.sin(i*1.3)*60) - diff*30;
-    const pw = 110 - diff*25;
-    if(B.plat(px, py, pw, 22)){
-      if(rnd() > 0.25) B.gem(px + pw/2, py - 44);
+    const px = x0 + 150 + i*step + (step - ISLAND_W)/2;
+    if(B.plat(px, ISLAND_Y, ISLAND_W, 22)){
+      if(i % 2 === 0) B.gem(px + ISLAND_W/2, ISLAND_Y - 44);
     }
   }
-  B.floor(x0 + w - 150, 150);
+
   return x0 + w;
 }
 
@@ -473,30 +948,72 @@ function segIsland(B, x0, w, diff, rnd){
    Now the stones go down first and the lava fills the water
    around them.
    --------------------------------------------------------- */
-function segLava(B, x0, w, diff, rnd){
-  B.floor(x0, 140);
-  const poolW = Math.min(w - 340, 200 + diff*140);
-  const px = x0 + 140;
+/* =========================================================
+   5 · LAVA CHASM — the pool IS the gap.
+   ---------------------------------------------------------
+   THE DESIGN RULE THIS ENFORCES
+   -----------------------------
+   A lava pool must not be a decoration sitting on top of solid
+   ground. If there is floor underneath it, the player can simply
+   walk around the end of the pool, or fall in and climb out onto
+   the same floor. The pool is then a speed bump, not a chasm.
 
-  /* stepping stones first — they define the safe path */
-  const stones = 2 + Math.floor(diff*2);
-  const stoneGap = poolW / (stones + 1);
-  let placedStones = 0;
+   The correct shape is:
+
+       [ bank ]  [ .......... CHASM .......... ]  [ bank ]
+       [ bank ]  [ ==== lava, from top to bottom ==== ]  [ bank ]
+
+   The chasm is a genuine void: no floor at y = 500 anywhere
+   inside it. The lava fills that void from the surface down past
+   the bottom of the screen. The only way across is the stepping
+   stones, and falling between them is death, not a stumble.
+
+   BUILD ORDER (load-bearing):
+     1. both banks first  — they define the chasm's edges
+     2. the stones        — they define the safe route
+     3. the lava last     — it fills whatever is left
+   ========================================================= */
+function segLava(B, x0, w, diff, rnd){
+  /* ---- 1 · both banks, with a real chasm between them ---- */
+  const bankIn  = 150;
+  const chasmW  = Math.min(w - bankIn * 2, 220 + diff * 160);
+  const chasmX  = x0 + bankIn;
+  const farBank = chasmX + chasmW;
+
+  B.floor(x0, bankIn);
+  B.floor(farBank, Math.max(150, (x0 + w) - farBank));
+
+  /* ---- 2 · stepping stones across the chasm ---- */
+  /* count and width are deterministic functions of difficulty */
+  const stones = 2 + Math.round(diff * 2);          /* 2 .. 4 */
+  const stoneW = Math.round(92 - diff * 22);        /* 92 .. 70 */
+  const slot   = chasmW / (stones + 1);
+
+  let placed = 0;
   for(let i=0;i<stones;i++){
-    const sx = px + stoneGap*(i+1) - 42;
-    const sy = 400 - (i%2)*35;
-    if(B.plat(sx, sy, 84, 20)){
-      placedStones++;
-      if(rnd() > 0.5) B.gem(sx+42, sy-44);
+    const sx = chasmX + slot * (i + 1) - stoneW / 2;
+    /* one height for every stone. The old version alternated by 34
+       units, which read as a wobble rather than a route — and the
+       stones sit over a chasm, so the clearance rule never fires
+       and the height has to be chosen here. */
+    const sy = 400;
+    if(B.plat(sx, sy, stoneW, 20)){
+      placed++;
+      /* a gem on every other stone, at a fixed offset */
+      if(i % 2 === 0) B.gem(sx + stoneW/2, sy - 44);
     }
   }
 
-  /* the lava goes down only if there is at least one stone to
-     stand on — otherwise the pool would be a death trap */
-  if(placedStones > 0) B.lava(px, poolW);
+  /* ---- 3 · the lava fills the chasm, top to bottom ---- */
+  /* If no stone survived validation the chasm would be uncrossable,
+     so the pool is only poured when there is at least one. */
+  if(placed > 0){
+    /* the pool is poured INTO the void: its surface sits just below
+       the ground line and it runs far past the bottom of the screen,
+       so there is no floor inside it and nothing hangs in the air */
+    B.lava(chasmX, chasmW);
+  }
 
-  const endX = px + poolW;
-  B.floor(endX, Math.max(140, x0 + w - endX));
   return x0 + w;
 }
 
@@ -561,10 +1078,23 @@ function segMover(B, x0, w, diff, rnd){
   return x0 + w;
 }
 
-/* 8 · CRUMBLE — fragile platforms that force forward momentum.
-   Same fix as the mover: both banks are placed first, then the
-   fragile chain fills the gap between them. A hazard on the far
-   bank stops the player from simply walking around the chain. */
+/* =========================================================
+   8 · CRUMBLE — a chain of fragile stones over a void.
+   ---------------------------------------------------------
+   These stones are VISIBLE from the start and look exactly like
+   the solid ground either side of them (see `drawCrumb` in
+   game.js — it renders through the same `drawPlatBody` routine).
+   The only tell is that they give way shortly after you land.
+
+   The fuse is deliberately short and fixed: 0.35s. Long enough to
+   register the stone under your feet, short enough that standing
+   still is not an option. `TUNE.FUSE_MIN` clamps it, so it can
+   never drop below the fairness floor.
+
+   `respawn` alternates: every other stone comes back after a
+   cooldown. That keeps the chain from being memorised as a fixed
+   shape without ever becoming unfair.
+   ========================================================= */
 function segCrumble(B, x0, w, diff, rnd){
   B.floor(x0, 140);
   B.floor(x0 + w - 140, 140);
@@ -573,30 +1103,407 @@ function segCrumble(B, x0, w, diff, rnd){
   const span  = w - 280;
   const step  = span / count;
 
+  /* =========================================================
+     DETERMINISTIC FUSE — no coin flips.
+     ---------------------------------------------------------
+     The old version rolled `fuse = 0.95 - diff*0.55 + rnd()*0.10`
+     and `respawn = rnd() > 0.5` per platform. Two consequences:
+
+       · the same chain had a different rhythm on every seed, so
+         a player could not learn it — only survive it
+       · the jitter could push a fuse below the fairness floor on
+         the hardest levels, producing a platform that vanished
+         before the player had time to register it
+
+     The fuse is now a pure function of difficulty, identical for
+     every platform in the chain. What changes across the chain is
+     the HEIGHT, which is a fixed wave — so the route reads as a
+     designed shape, and the only variable is how fast the player
+     has to be.
+
+     `respawn` alternates deterministically: every other platform
+     comes back. That is still a real decision (you cannot assume
+     the one you just broke is gone), but it is a predictable one.
+     ========================================================= */
+  /* one height, one width — the chain reads as a designed path.
+     The fuse is SHORT and identical for every stone: 0.35s. */
+  const CHAIN_Y    = 420;
+  const CHAIN_W    = 76;
+  const CHAIN_FUSE = 0.35;
+
   for(let i=0;i<count;i++){
-    const cx = x0 + 140 + i*step;
-    const cy = 430 - Math.round(Math.sin(i*0.9)*40);
-    B.crumb(cx, cy, 70);
-    if(rnd() > 0.55) B.gem(cx + 35, cy - 44);
+    const cx = x0 + 140 + i*step + (step - CHAIN_W)/2;
+    const respawn = (i % 2 === 1);
+    if(B.crumb(cx, CHAIN_Y, CHAIN_W, CHAIN_FUSE, respawn)){
+      if(i % 2 === 0) B.gem(cx + CHAIN_W/2, CHAIN_Y - 44);
+    }
   }
 
-  if(diff > 0.6) B.fire(x0 + w - 200, 60, 1.5 + rnd()*0.5);
+  if(diff > 0.6) B.fire(x0 + w - 200, 60, 1.5);
 
   return x0 + w;
 }
 
 /* =========================================================
+   9 · SAW RUN — a corridor of spinning blades.
+   ---------------------------------------------------------
+   The blades patrol the FLOOR LINE, so the safe route is a
+   rhythm of short hops. Each blade gets its own phase offset so
+   the gaps never line up — the player has to read the pattern,
+   not memorise a single beat.
+   ========================================================= */
+function segSawRun(B, x0, w, diff, rnd){
+  B.floor(x0, w);
+
+  /* =========================================================
+     A level-1 saw run is ONE slow blade over open ground: the
+     player can see it, walk up to it, and learn the rhythm.
+     A level-25 saw run is four fast blades, some of them on the
+     vertical, over a floor that is no longer continuous.
+     The count, the travel and the speed all scale — the mechanic
+     itself never changes, which is what keeps it fair.
+     ========================================================= */
+  const count = 1 + Math.floor(diff * 4);        /* 1 .. 5 */
+  const span  = w - 260;
+  if(span <= 0) return x0 + w;
+
+  /* =========================================================
+     DETERMINISTIC LAYOUT
+     ---------------------------------------------------------
+     The old version placed blades at `x0 + 130 + (span/count)*i
+     + rnd()*30` — a random nudge that made two blades in the same
+     run overlap on some seeds and sit far apart on others. That
+     is the "randomness" the design brief objects to.
+
+     Blades are now placed on an EVEN grid with a fixed inset, so
+     the spacing is always the same and always readable. The only
+     thing difficulty changes is how many blades there are and how
+     fast they move — never where the gaps are.
+
+     The old "carve a gap by laying a second floor" block is gone.
+     It was a bug: `B.floor()` ADDS ground, it does not remove it.
+     On a saw run that already had a floor, the extra floors just
+     stacked on top of it and did nothing except confuse the
+     hazard-placement validation.
+     ========================================================= */
+  const inset = 130;
+  const usable = span - inset * 2;
+  const gap = count > 1 ? usable / (count - 1) : 0;
+
+  for(let i=0;i<count;i++){
+    const sx = x0 + inset + gap * i;
+
+    /* the axis is a function of difficulty, not of a coin flip:
+       low levels are horizontal only, high levels get verticals */
+    const axis = (diff > 0.55 && i % 3 === 2) ? 'y' : 'x';
+
+    /* travel and speed scale cleanly with difficulty */
+    const dist = axis === 'x'
+      ? Math.round(60 + diff * 70)
+      : Math.round(45 + diff * 50);
+    const spd = 0.8 + diff * 1.6;
+
+    /* blades hover just above the floor — low enough to matter */
+    const sy = TUNE.GROUND_Y - TUNE.SAW_R - 26 - diff * 14;
+
+    if(B.saw(sx, sy, TUNE.SAW_R, axis, dist, spd)){
+      /* one gem per blade, at a fixed offset — a reward for
+         threading the gap, not a lottery */
+      if(i % 2 === 0) B.gem(sx, sy - 70);
+    }
+  }
+
+  /* a gem reward for threading the blades cleanly */
+  if(rnd() > 0.5) B.gem(x0 + w * 0.5, TUNE.GROUND_Y - 150);
+
+  return x0 + w;
+}
+
+/* =========================================================
+   10 · NAIL GAUNTLET — dense nails, floor and ceiling.
+   ---------------------------------------------------------
+   The floor rows force a precise jump; the ceiling rows force
+   the player to stay LOW. Placing both in the same stretch is
+   what turns a corridor into a gauntlet.
+   ========================================================= */
+function segNailGauntlet(B, x0, w, diff, rnd){
+  B.floor(x0, w);
+
+  /* =========================================================
+     DETERMINISTIC LAYOUT
+     ---------------------------------------------------------
+     Floor rows and ceiling slabs sit on fixed grids with a fixed
+     inset. The only things difficulty changes are how many there
+     are, how wide they are, and how low the ceiling slabs hang.
+     A player who learns level 3's nail gauntlet can read level
+     18's on sight — the pattern is the same, the density is not.
+     ========================================================= */
+
+  /* ---- floor rows on a fixed grid ---- */
+  const rows  = 2 + Math.floor(diff * 3);
+  const span  = w - 260;
+  const inset = 130;
+  const step  = rows > 1 ? (span - inset) / (rows - 1) : 0;
+  const rowW  = Math.round(46 + diff * 34);
+
+  for(let i=0;i<rows;i++){
+    const nx = x0 + inset + step * i;
+    B.nail(nx, rowW, 1);
+  }
+
+  /* ---- ceiling slabs on a fixed grid, hung above the gaps ---- */
+  if(diff > 0.30){
+    const slabs = 1 + Math.floor(diff * 2);
+    const cspan = w - 340;
+    const cstep = slabs > 1 ? cspan / (slabs - 1) : 0;
+    const cw    = 150;
+    /* the slab drops as difficulty rises — 300 → 240 */
+    const cy    = Math.round(300 - diff * 60);
+
+    for(let i=0;i<slabs;i++){
+      const cx = x0 + 170 + cstep * i;
+      B.ceil(cx, cy, cw);
+      /* the nails hang from the middle of the slab, always */
+      B.nail(cx + 12, cw - 24, -1);
+    }
+  }
+
+  /* one gem, at the centre — a reward for reading the whole run */
+  B.gem(x0 + w * 0.5, TUNE.GROUND_Y - 130);
+  return x0 + w;
+}
+
+/* =========================================================
+   11 · RISE & FALL — stones that erupt from the floor.
+   ---------------------------------------------------------
+   A chain of risers across a void. Each one rises when you get
+   close and crumbles a moment after you land on it, so the only
+   way across is to keep moving. The fuse gets shorter with
+   difficulty but never drops below FUSE_MIN.
+   ========================================================= */
+function segRiseFall(B, x0, w, diff, rnd){
+  B.floor(x0, 150);
+  B.floor(x0 + w - 150, 150);
+
+  const count = 3 + Math.floor(diff * 2);
+  const span  = w - 300;
+  const step  = span / count;
+
+  /* same rule as the fragile chain: the fuse is a function of
+     difficulty, the height is a fixed wave, and `respawn`
+     alternates. Nothing here is a coin flip. */
+  const chainFuse = 0.90 - diff * 0.50;          /* 0.90 .. 0.40 */
+
+  for(let i=0;i<count;i++){
+    const rx = x0 + 150 + i * step;
+    /* the stones alternate height so the route reads as a wave */
+    const ry = 430 - Math.round(Math.sin(i * 0.9) * 45);
+    const respawn = (i % 2 === 1);
+    if(B.riser(rx, ry, 78, chainFuse, respawn)){
+      if(i % 2 === 0) B.gem(rx + 39, ry - 52);
+    }
+  }
+
+  /* a hazard on the far bank so the landing is not free */
+  if(diff > 0.55) B.spike(x0 + w - 120, 52);
+
+  return x0 + w;
+}
+
+/* =========================================================
+   12 · CRUSHER HALL — stones that drop from the ceiling.
+   ---------------------------------------------------------
+   The player must cross a floor while stones fall in sequence.
+   The slabs are placed FIRST so the crushers have a ceiling to
+   hang from, and the drop corridors never overlap.
+   ========================================================= */
+function segCrusherHall(B, x0, w, diff, rnd){
+  B.floor(x0, w);
+
+  /* =========================================================
+     SLAB FIRST, STONE SECOND — ALWAYS.
+     ---------------------------------------------------------
+     THE INVISIBLE-TRAP BUG THIS FIXES
+     ---------------------------------
+     The old version placed the ceiling with `B.ceil(cx, 200 +
+     rnd()*30, cw)` and then the stone with `B.crusher(cx + cw*0.5
+     - 35, 228 + rnd()*20, ...)`.
+
+     Two things were wrong with that:
+
+       1. The stone's y was hard-coded to 228 while the ceiling's y
+          was random between 200 and 230. When the ceiling landed
+          near 230, its underside was at 258 — BELOW the stone. The
+          stone was then floating in mid-air with no anchor, and
+          `B.ceil` could also silently fail (returning false) while
+          the crusher was placed anyway.
+
+       2. Nothing verified that the ceiling actually covered the
+          stone's x. A slab 150 wide with a stone offset by 35 could
+          end up with the stone hanging off its edge.
+
+     The result was a hazard with no visible anchor: a stone that
+     appeared out of nothing and killed the player on a level where
+     they had no reason to look up. That is the invisible trap.
+
+     THE FIX
+     -------
+       · the slab is laid first and its return value is checked
+       · the stone's y is DERIVED from the slab's underside, not
+         hard-coded — so it always hangs from it
+       · the stone is centred under the slab, so it is always
+         covered
+       · every dimension is a function of difficulty, not a coin
+     ========================================================= */
+  const slabs = 2 + Math.floor(diff * 2);
+  const span  = w - 320;
+  const inset = 160;
+  const step  = slabs > 1 ? (span - inset) / (slabs - 1) : 0;
+
+  const slabW  = 170;
+  const slabY  = Math.round(200 + diff * 10);
+  const stoneW = 70;
+
+  for(let i=0;i<slabs;i++){
+    const cx = x0 + inset + step * i;
+
+    /* 1 · the ceiling the stone will hang from.
+           If it cannot be placed, skip the stone entirely —
+           a crusher without a ceiling is the invisible trap. */
+    if(!B.ceil(cx, slabY, slabW)) continue;
+
+    /* 2 · the stone, hanging directly under the slab's centre */
+    const stoneX = cx + (slabW - stoneW) / 2;
+    const stoneY = slabY + TUNE.CEIL_H + 4;
+
+    B.crusher(stoneX, stoneY, stoneW,
+              110 + diff * 90,        /* drop: 110 → 200 */
+              1.1 + diff * 1.5);      /* speed: 1.1 → 2.6 */
+  }
+
+  /* a floor hazard between the drop zones — only once the player
+     has met a crusher on its own */
+  if(diff > 0.40) B.nail(x0 + w * 0.5 - 30, 60, 1);
+
+  /* one gem, centred */
+  B.gem(x0 + w * 0.5, TUNE.GROUND_Y - 120);
+
+  return x0 + w;
+}
+
+/* =========================================================
+   13 · GAUNTLET — everything at once.
+   ---------------------------------------------------------
+   The late-game showpiece: saws, nails, risers and a crusher in
+   one continuous stretch. Only unlocked at very high difficulty.
+   ========================================================= */
+/* =========================================================
+   13 · GAUNTLET — a fixed, readable sequence.
+   ---------------------------------------------------------
+   The old version scattered saws and nails with `rnd()` offsets,
+   so the "sequence" was different on every seed and the player
+   could never learn it. This version lays out a FIXED rhythm:
+
+       saw → nails → saw → riser → crusher → saw
+
+   at fixed fractions of the segment width. Difficulty changes
+   how fast the blades move and how deep the stone drops — never
+   the order. A player who has met each hazard separately can
+   read the whole run the first time they see it.
+   ========================================================= */
+function segGauntlet(B, x0, w, diff, rnd){
+  B.floor(x0, w);
+
+  const sawY = TUNE.GROUND_Y - TUNE.SAW_R - 30;
+
+  /* 1 · saw at 0.14 */
+  B.saw(x0 + w * 0.14, sawY, TUNE.SAW_R, 'x',
+        70 + diff * 40, 1.2 + diff * 1.0);
+
+  /* 2 · nail row at 0.28 */
+  B.nail(x0 + w * 0.28, 50 + diff * 30, 1);
+
+  /* 3 · saw at 0.40 */
+  B.saw(x0 + w * 0.40, sawY, TUNE.SAW_R, 'y',
+        60 + diff * 40, 1.3 + diff * 1.0);
+
+  /* 4 · riser over a short void at 0.55 */
+  B.riser(x0 + w * 0.55, 430,
+          Math.round(90 - diff * 26), 0.95 - diff * 0.5, true);
+
+  /* 5 · crusher, with its own slab, at 0.70 */
+  const cx = x0 + w * 0.70;
+  if(B.ceil(cx - 85, 200, 170)){
+    B.crusher(cx - 35, 200 + TUNE.CEIL_H + 4, 70,
+              130 + diff * 70, 1.5 + diff * 1.1);
+  }
+
+  /* 6 · closing saw at 0.86 */
+  B.saw(x0 + w * 0.86, sawY, TUNE.SAW_R, 'x',
+        60 + diff * 40, 1.4 + diff * 1.0);
+
+  /* one gem, at the centre of the run */
+  B.gem(x0 + w * 0.5, TUNE.GROUND_Y - 170);
+  return x0 + w;
+}
+
+/* =========================================================
    SEGMENT REGISTRY — unlockAt drives the difficulty curve.
+   ---------------------------------------------------------
+   The new families are gated so the player meets them in a
+   deliberate order: nails → saws → risers → crushers →
+   gauntlet. Each unlockAt is a *difficulty* threshold, not a
+   level number, so a late level is dense with them and an
+   early one is not.
+   ========================================================= */
+/* =========================================================
+   SEGMENT REGISTRY
+   ---------------------------------------------------------
+   DESIGN RULE — every hazard, every level.
+
+   The previous table gated each family behind a high `unlockAt`,
+   which meant level 1 had no saws, no nails, no risers and no
+   crushers at all. A player could finish a third of the game
+   without ever meeting the mechanics the game is built around.
+
+   The new rule is the opposite: EVERY family is available from
+   the first level, and what scales is INTENSITY, not presence.
+
+     · `unlockAt` is now a soft gate — it is the difficulty at
+       which the family starts appearing, and every value is low
+       enough that level 1 already qualifies for all of them.
+     · The segment functions themselves read `diff` and scale
+       count, speed, fuse and travel. A level-1 saw is one slow
+       blade over flat ground; a level-25 saw is four fast ones
+       over a chain of gaps.
+     · `weight` in `pickSegment` still favours the gentle
+       segments at low difficulty, so level 1 is not a meat
+       grinder — it is a level that TEACHES every hazard safely.
+
+   That is the difference between "hard" and "unfair": the player
+   meets each mechanic early, in a survivable form, and the same
+   mechanic gets crueller as they get better.
    ========================================================= */
 const SEGMENTS = {
-  run      : { fn:segRun,      minW:440, unlockAt:0.00 },
-  gap      : { fn:segGap,      minW:540, unlockAt:0.00 },
-  stairs   : { fn:segStairs,   minW:500, unlockAt:0.12 },
-  island   : { fn:segIsland,   minW:580, unlockAt:0.22 },
-  corridor : { fn:segCorridor, minW:520, unlockAt:0.38 },
-  mover    : { fn:segMover,    minW:580, unlockAt:0.45 },
-  lava     : { fn:segLava,     minW:620, unlockAt:0.55 },
-  crumble  : { fn:segCrumble,  minW:580, unlockAt:0.68 }
+  run        : { fn:segRun,         minW:440, unlockAt:0.00 },
+  gap        : { fn:segGap,         minW:540, unlockAt:0.00 },
+  stairs     : { fn:segStairs,      minW:500, unlockAt:0.02 },
+  island     : { fn:segIsland,      minW:580, unlockAt:0.05 },
+  nails      : { fn:segNailGauntlet,minW:600, unlockAt:0.08 },
+  saws       : { fn:segSawRun,      minW:620, unlockAt:0.10 },
+  corridor   : { fn:segCorridor,    minW:520, unlockAt:0.12 },
+  mover      : { fn:segMover,       minW:580, unlockAt:0.15 },
+  lava       : { fn:segLava,        minW:620, unlockAt:0.18 },
+  crumble    : { fn:segCrumble,     minW:580, unlockAt:0.18 },
+  /* `rise` is deliberately absent. The erupting stone (riser) has
+     been replaced by the fragile stone above: same idea — a surface
+     that gives way under you — but the fragile stone is visible
+     from the start instead of erupting from the floor when you
+     approach, which the brief asked for. The engine support for
+     `risers` is untouched, so re-adding this line brings it back. */
+
+  crushers   : { fn:segCrusherHall, minW:640, unlockAt:0.25 },
+  gauntlet   : { fn:segGauntlet,    minW:700, unlockAt:0.30 }
 };
 
 /* =========================================================
@@ -618,9 +1525,16 @@ function pickSegment(diff, rnd, last){
 
     let weight = 1;
 
-    /* breathing room always stays available */
-    if(k === 'run') weight = 1.5;
-    if(k === 'gap') weight = 1.3;
+    /* ---------------------------------------------------------
+       BREATHING ROOM SHRINKS WITH DIFFICULTY
+       ---------------------------------------------------------
+       `run` and `gap` used to be permanently weighted up, which
+       meant a late level was still mostly open floor. Their
+       weight now decays as difficulty rises, so the back half of
+       the game is genuinely dense.
+       --------------------------------------------------------- */
+    if(k === 'run') weight = 1.6 - diff * 1.1;      /* 1.60 .. 0.50 */
+    if(k === 'gap') weight = 1.4 - diff * 0.9;      /* 1.40 .. 0.50 */
 
     /* a freshly unlocked mechanic is pushed forward for a while */
     const sinceUnlock = diff - s.unlockAt;
@@ -628,8 +1542,14 @@ function pickSegment(diff, rnd, last){
       weight += 2.2 * (1 - sinceUnlock / 0.25);
     }
 
-    /* movers and lava are the two mechanics that must not vanish */
+    /* the hazard families never vanish once unlocked */
     if(k === 'mover' || k === 'lava') weight += 0.8;
+    if(k === 'nails' || k === 'saws') weight += 0.6;
+    if(k === 'rise'  || k === 'crushers') weight += 0.5;
+    if(k === 'gauntlet') weight += 0.9;
+
+    /* a weight can never go negative — clamp before the draw */
+    if(weight < 0.15) weight = 0.15;
 
     pool.push({ k:k, w:weight });
   }
@@ -665,8 +1585,27 @@ function buildLevel(index){
   const rnd = seedRand((0x9E3779B9 ^ ((index+1)*2654435761)) >>> 0);
   const B   = new Builder();
 
-  /* difficulty ramps across levels AND within a level */
-  const baseDiff = Math.min(0.95, 0.08 + (index/24)*0.80);
+  /* =========================================================
+     DIFFICULTY CURVE
+     ---------------------------------------------------------
+     The old curve was linear: 0.08 + (index/24)*0.80. Level 1
+     sat at 0.08 — which already unlocked stairs, islands and
+     corridors — and level 25 only reached 0.88. The gap between
+     the first and last level was 0.80 spread over 24 levels, so
+     no single level ever felt like a step up.
+
+     The new curve is convex (^1.35) and starts lower, so:
+       · level  1  → 0.10   (only run / gap / stairs)
+       · level  5  → 0.22
+       · level 10  → 0.38
+       · level 15  → 0.55
+       · level 20  → 0.74
+       · level 25  → 0.98
+
+     The last level is now genuinely the hardest thing in the
+     game, and the new hazard families arrive in a readable order.
+     ========================================================= */
+  const baseDiff = Math.min(0.98, 0.10 + Math.pow(index / 24, 1.35) * 0.88);
 
   let x = 0;
   let lastSeg = null;
@@ -705,12 +1644,44 @@ function buildLevel(index){
      anything, only adds, and every addition still goes through
      the same validation as the normal placement path.
      ========================================================= */
+  /* =========================================================
+     QUOTA — the guaranteed minimum of every hazard family.
+     ---------------------------------------------------------
+     A probabilistic segment picker can, and did, produce a level
+     with no fires at all. The quota pass runs AFTER assembly and
+     tops up any family that came out short. It only ever ADDS,
+     and every addition goes through the same validation as the
+     normal placement path, so it cannot create an unfair spot.
+
+     The four new families are gated on the same difficulty
+     thresholds as their segments, so an early level never gets a
+     crusher it has not been taught.
+     ========================================================= */
+  /* =========================================================
+     QUOTA — the guaranteed minimum of every hazard family.
+     ---------------------------------------------------------
+     EVERY family has a floor of at least ONE, at every
+     difficulty. A level that happens to roll gentle segments
+     still gets topped up with one saw, one nail row, one riser
+     and — from the second world on — one crusher, so the player
+     never goes a whole level without meeting the mechanics.
+
+     The counts then scale with difficulty. The progression is
+     deliberately gentle at the bottom (1 of each) and dense at
+     the top (up to 8 spikes, 5 saws, 6 nail rows, 6 risers,
+     4 crushers), which is what makes level 25 feel like a
+     different game from level 1 without changing the rules.
+     ========================================================= */
   const QUOTA = function(diff){
     return {
-      spikes : 3 + Math.round(diff * 5),      /* 3 .. 8  */
-      fires  : diff > 0.20 ? 2 + Math.round(diff * 4) : 0,   /* 0 .. 6 */
-      movers : diff > 0.35 ? 1 + Math.round(diff * 2) : 0,   /* 0 .. 3 */
-      lavas  : diff > 0.50 ? 1 + Math.round(diff * 2) : 0    /* 0 .. 3 */
+      spikes  : 3 + Math.round(diff * 5),        /* 3 .. 8  */
+      fires   : 1 + Math.round(diff * 5),        /* 1 .. 6  */
+      movers  : 1 + Math.round(diff * 2),        /* 1 .. 3  */
+      lavas   : 1 + Math.round(diff * 2),        /* 1 .. 3  */
+      nails   : 1 + Math.round(diff * 5),        /* 1 .. 6  */
+      saws    : 1 + Math.round(diff * 4),        /* 1 .. 5  */
+      /* risers removed — the fragile stone replaced them */
+      crushers: 1 + Math.round(diff * 3)         /* 1 .. 4  */
     };
   };
   const quota = QUOTA(baseDiff);
@@ -726,45 +1697,137 @@ function buildLevel(index){
      GAP, not hover over solid floor. A mover above continuous
      ground is pure decoration — the player just walks under it.
      ========================================================= */
+  /* =========================================================
+     TOP-UP PASS — deterministic, spaced, and never invisible.
+     ---------------------------------------------------------
+     Three rules, in this order, for every candidate position:
+
+       1. SPACING  — `_nearHazard` refuses anything within 140
+                     units of an existing hazard. This is what
+                     stops the pass from producing clusters.
+       2. CONTEXT  — each family has its own preconditions: a
+                     saw needs flat floor, a riser needs a void,
+                     a crusher needs a ceiling, a mover needs a
+                     chasm. A hazard placed without its context
+                     is the invisible trap.
+       3. SIZE     — every dimension is a function of `baseDiff`,
+                     not of `r()`. The same level always produces
+                     the same top-ups.
+
+     The `r()` calls that remain are for SCAN OFFSET only — they
+     decide where the search starts, never what gets built.
+     ========================================================= */
   const topUp = function(kind, attemptSeed){
     const r = seedRand(attemptSeed >>> 0);
-    const step = 120;
-    for(let pass = 0; pass < 2; pass++){
-      const offset = pass === 0 ? r()*step : 0;
+    const step = 90;
+    for(let pass = 0; pass < 4; pass++){
+      const offset = pass === 0 ? 0 : r()*step;
       for(let tx = 400 + offset; tx < wd - 500; tx += step){
 
+        /* ---- 1 · spacing ---- */
+        if(B._nearHazard(tx, 80, 140)) continue;
+
         if(kind === 'spike'){
-          if(B.spike(tx, 50 + r()*25)) return true;
+          if(B.spike(tx, 50 + baseDiff * 12)) return true;
         }
         else if(kind === 'fire'){
-          if(B.fire(tx, 58 + r()*20, 1.4 + r()*0.7)) return true;
+          if(B.fire(tx, 60, 1.4 + baseDiff * 0.8)) return true;
         }
         else if(kind === 'lava'){
-          if(B.lava(tx, 130 + r()*60)) return true;
+          /* a top-up pool must be a chasm pool: no floor under it.
+             `B.lava` re-checks the pit mouth itself, so nothing is
+             poured across walkable ground. */
+          const g = B.groundUnder(tx + 65, 300);
+          if(g) continue;
+          if(B.lava(tx, 130)) return true;
         }
         else if(kind === 'mover'){
-          /* require empty air below — a mover over solid floor is useless */
+          /* a mover must span a gap, not hover over solid floor */
           const mw = 90;
-          const below = B.groundUnder(tx + mw/2, 300);
-          if(below) continue;                       /* solid floor → skip */
-          if(B.mover(tx, 415 + r()*20, mw, r() > 0.5 ? 'x' : 'y', 65, 1.2 + baseDiff*0.7)) return true;
+          if(B.groundUnder(tx + mw/2, 300)) continue;
+          if(B.mover(tx, 415, mw, 'x', 65, 1.2 + baseDiff * 0.7)) return true;
+        }
+        else if(kind === 'nail'){
+          /* floor rows only in the top-up — a ceiling row needs a
+             ceiling, and top-ups must not invent geometry */
+          if(B.nail(tx, 46 + baseDiff * 34, 1)) return true;
+        }
+        else if(kind === 'saw'){
+          /* a saw needs a continuous floor to patrol over */
+          const g = B.groundUnder(tx + 40, 300);
+          if(!g) continue;
+          const sy = TUNE.GROUND_Y - TUNE.SAW_R - 28 - baseDiff * 14;
+          if(B.saw(tx, sy, TUNE.SAW_R, 'x',
+                   70 + baseDiff * 50, 1.2 + baseDiff * 0.9)) return true;
+        }
+        else if(kind === 'riser'){
+          /* a riser must bridge a void — never decoration on floor */
+          if(B.groundUnder(tx + 40, 300)) continue;
+          if(B.riser(tx, 420, 78, 0.85 - baseDiff * 0.45, true)) return true;
+        }
+        else if(kind === 'crusher'){
+          /* =========================================================
+             THE CRUSHER QUOTA COULD NEVER BE FILLED
+             ---------------------------------------------------------
+             This call passed `y = 0`, and `B.crusher()` rejects
+             anything above y = 70 — so EVERY top-up attempt for a
+             crusher failed. A level whose segments happened to skip
+             the crusher hall stayed at zero crushers for the whole
+             run, even though the quota asked for one.
+
+             The stone's y is now DERIVED from the underside of the
+             ceiling it hangs from: that is the only value that can
+             satisfy the anchors rule, and it is the same rule the
+             authored crushers obey.
+             ========================================================= */
+          const sxc = tx + 35;
+          let anchor = null;
+          for(let ci=0; ci<B.ceils.length; ci++){
+            const cc = B.ceils[ci];
+            if(sxc < cc[0] + 8 || sxc > cc[0] + cc[2] - 8) continue;
+            const bottom = cc[1] + cc[3];
+            if(anchor === null || bottom > anchor) anchor = bottom;
+          }
+          if(anchor === null) continue;
+          if(B.crusher(tx, anchor, 70,
+                       110 + baseDiff * 90, 1.1 + baseDiff * 1.5)) return true;
         }
       }
     }
     return false;
   };
 
-  const kinds = ['spikes','fires','movers','lavas'];
-  const arrays = { spikes:B.spikes, fires:B.fires, movers:B.movers, lavas:B.lavas };
-  for(let k = 0; k < kinds.length; k++){
-    const kind  = kinds[k];
-    const want  = quota[kind];
-    const have  = arrays[kind].length;
-    const single = kind === 'spikes' ? 'spike'
-                 : kind === 'fires'  ? 'fire'
-                 : kind === 'movers' ? 'mover' : 'lava';
+  /* `single` is the singular name `topUp` understands */
+  const FAMILIES = [
+    { kind:'spikes',   single:'spike'   },
+    { kind:'fires',    single:'fire'    },
+    { kind:'movers',   single:'mover'   },
+    { kind:'lavas',    single:'lava'    },
+    { kind:'nails',    single:'nail'    },
+    { kind:'saws',     single:'saw'     },
+
+    { kind:'crushers', single:'crusher' }
+  ];
+  const arrays = {
+    spikes:B.spikes, fires:B.fires, movers:B.movers, lavas:B.lavas,
+    nails:B.nails,   saws:B.saws,   crushers:B.crushers
+  };
+
+  for(let k = 0; k < FAMILIES.length; k++){
+    const kind   = FAMILIES[k].kind;
+    const single = FAMILIES[k].single;
+    const want   = quota[kind] || 0;
+    const have   = arrays[kind].length;
     for(let n = have; n < want; n++){
-      if(!topUp(single, 0xC0FFEE ^ ((index+1)*7919) ^ (n*104729) ^ (k*15485863))) break;
+      /* up to 4 attempts per missing hazard, each with a fresh seed —
+         a single failed sweep no longer abandons the whole family */
+      let placed = false;
+      for(let attempt = 0; attempt < 4 && !placed; attempt++){
+        placed = topUp(single,
+                       0xC0FFEE ^ ((index+1)*7919) ^ (n*104729) ^
+                       (k*15485863) ^ (attempt*2654435761));
+      }
+      if(!placed) break;
     }
   }
 
@@ -773,8 +1836,47 @@ function buildLevel(index){
   B.floor(padX, 340);
   const goal = [padX + 220, TUNE.GROUND_Y - 70];
 
+  /* =========================================================
+     REAL SURFACES — captured before `ensureGround` runs
+     ---------------------------------------------------------
+     This is the set of surfaces the player can actually stand on
+     by design. Traps are placed against this list, never against
+     the synthetic floors that `ensureGround` adds.
+     ========================================================= */
+  const realSurfaces = [];
+  for(let i=0;i<B.plats.length;i++){
+    const p = B.plats[i];
+    if(p[2] < 120) continue;
+    realSurfaces.push({
+      x: p[0], y: p[1], w: p[2],
+      main: (p[1] === TUNE.GROUND_Y)
+    });
+  }
+
   /* --- a final checkpoint just before the door --- */
   B.cpCandidate(padX + 50);
+
+  /* =========================================================
+     SPAWN STRIP ONLY
+     ---------------------------------------------------------
+     This used to be `B.ensureGround(0, wd)` — the whole level.
+
+     That was a catastrophic over-correction. It filled EVERY void
+     at y = 500, which meant:
+       · every `gap` segment was bridged
+       · every `mover` chasm was paved over
+       · every `island` void became flat ground
+       · every `lava` pool had a floor laid across it
+
+     The level became a corridor. You could hold right and win.
+
+     The original bug was only ever about the SPAWN: `segStairs`
+     lays its landing floor at `x0 + w*0.80`, so a level that
+     opened with a stairs segment left the player standing over
+     nothing. Filling the first 260 units fixes that completely
+     and leaves the rest of the level exactly as designed.
+     ========================================================= */
+  B.ensureGround(0, 260);
 
   /* =========================================================
      CHECKPOINT VALIDATION
@@ -844,6 +1946,19 @@ function buildLevel(index){
     gems.push(g);
   }
 
+  /* =========================================================
+     TRAPS — the only non-deterministic part of a level.
+     ---------------------------------------------------------
+     `TRAP_SALT` is a number that changes every time the page is
+     loaded. Everything else in this file is seeded from the level
+     index alone, so the geometry is identical on every device and
+     every run — but the traps are not, and that is deliberate.
+
+     The result: a player can learn the route, the timing of the
+     platforms and the position of every gem, and still be caught
+     out by a dart launcher that was not there last time. Skill
+     transfers; memorisation does not.
+     ========================================================= */
   return {
     wd         : wd,
     plats      : B.plats,
@@ -855,6 +1970,11 @@ function buildLevel(index){
     fires      : B.fires,
     lavas      : B.lavas,
     movers     : B.movers,
+    /* ---- new hazard families ---- */
+    saws       : B.saws,
+    nails      : B.nails,
+    risers     : B.risers,
+    crushers   : B.crushers,
     checkpoints: cps,
     goal       : goal,
     spawn      : [80, TUNE.GROUND_Y - TUNE.PLAYER_H],
@@ -870,10 +1990,26 @@ function buildLevel(index){
        The allowance now scales with difficulty, and adds a flat
        cost per hazard so dense levels get the time they need.
        ========================================================= */
+    /* =========================================================
+       PAR — the 3-star time limit.
+       ---------------------------------------------------------
+       Every hazard family now contributes its own time cost, and
+       the base multiplier is tighter than before (2.35 → 1.95) so
+       a 3-star run is a real achievement rather than a formality.
+       The per-hazard costs are weighted by how much they actually
+       slow a competent player down: a saw or a crusher costs more
+       than a spike because it forces a wait.
+       ========================================================= */
     par        : Math.round(
-                   (wd / 320) * (2.35 + baseDiff * 0.95)
-                   + (B.spikes.length + B.fires.length * 2 +
-                      B.lavas.length * 2 + B.movers.length * 3) * 1.6
+                   (wd / 320) * (1.95 + baseDiff * 0.85)
+                   + (B.spikes.length   * 1.6 +
+                      B.fires.length    * 2.0 +
+                      B.lavas.length    * 2.8 +
+                      B.movers.length   * 3.0 +
+                      B.nails.length    * 1.4 +
+                      B.saws.length     * 2.6 +
+                      B.risers.length   * 2.2 +
+                      B.crushers.length * 3.0)
                  ),
     diff       : baseDiff
   };

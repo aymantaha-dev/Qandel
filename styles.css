@@ -434,15 +434,34 @@ html[dir="rtl"] .btn.primary::after{
 
 @keyframes pop{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
 
-/* the modal sheet: content-sized, capped, never scrollable */
+/* =========================================================
+   MODAL SHEET
+   ---------------------------------------------------------
+   The old rule was `overflow:hidden` with the comment "no
+   scrolling, ever". That was the wrong call: a modal that fits
+   is fine, but a modal whose content is taller than the viewport
+   — the About screen, a long game-over line, a results sheet on
+   a small phone — simply CUT ITS OWN CONTENT OFF, with no way to
+   reach it. The buttons at the bottom became unreachable.
+
+   Correct behaviour: the sheet is a scroll container, but the
+   scrollbar is invisible (the standard touch-UI pattern) and the
+   content is padded so nothing sits flush against the rounded
+   edge. If everything fits, nothing scrolls and it looks
+   identical to before.
+   ========================================================= */
 .overlay .sheet{
   position:relative;
   width:min(430px,92vw);
   max-height:calc(100dvh - clamp(24px,5vh,56px));
-  overflow:hidden;                 /* ← no scrolling, ever */
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
   scrollbar-width:none;
   -ms-overflow-style:none;
   display:flex;flex-direction:column;
+  gap:clamp(10px,1.8vh,16px);
   padding:clamp(20px,3.2vh,30px) clamp(18px,3vw,26px);
   border-radius:22px;
   background:linear-gradient(168deg,rgba(38,27,52,.97),rgba(14,10,22,.99));
@@ -454,6 +473,7 @@ html[dir="rtl"] .btn.primary::after{
   text-align:center;
   animation:sheetIn .28s cubic-bezier(.2,1.15,.4,1) both;
 }
+.overlay .sheet::-webkit-scrollbar{width:0;height:0;display:none}
 @keyframes sheetIn{
   from{opacity:0;transform:translateY(14px) scale(.96)}
   to{opacity:1;transform:translateY(0) scale(1)}
@@ -466,15 +486,38 @@ html[dir="rtl"] .btn.primary::after{
   background:linear-gradient(90deg,transparent,rgba(255,201,120,.60),transparent);
 }
 
+/* =========================================================
+   MODAL TYPOGRAPHY & SPACING
+   ---------------------------------------------------------
+   The old sheet set a 6px bottom margin on the heading and let
+   everything else collapse against it, so the title, the body
+   and the buttons read as one block of text with no hierarchy.
+
+   Now every block has its own rhythm: the heading sits clear of
+   what follows, the body has real line-height, and the action
+   stack is separated by a rule so the buttons are unmistakably
+   the last thing on the sheet.
+   ========================================================= */
 .overlay h2{
   font-size:clamp(19px,2.6vh,24px);font-weight:900;
-  letter-spacing:-.01em;margin:0 0 6px;line-height:1.25;
+  letter-spacing:-.01em;
+  margin:0 0 clamp(8px,1.4vh,12px);
+  line-height:1.3;
 }
+/* body copy inside a modal */
+.overlay p{
+  font-size:clamp(13px,1.85vh,15px);
+  line-height:1.85;
+  color:#e6d8c6;
+  margin:0 0 clamp(6px,1.2vh,10px);
+}
+.overlay p:last-of-type{margin-bottom:0}
 
 /* results: stars + two compact stat tiles */
 .stars-big{
-  display:flex;justify-content:center;gap:clamp(8px,2vw,14px);
-  margin:2px 0 clamp(14px,2.4vh,20px);
+  display:flex;justify-content:center;
+  gap:clamp(8px,2vw,14px);
+  margin:clamp(2px,.6vh,6px) 0 clamp(12px,2.2vh,18px);
 }
 .stars-big .ic{
   width:clamp(30px,5vh,42px);height:clamp(30px,5vh,42px);
@@ -511,13 +554,26 @@ html[dir="rtl"] .btn.primary::after{
   color:var(--gold);font-variant-numeric:tabular-nums;
 }
 
-/* actions inside a modal: full-width stack, generous tap targets */
+/* =========================================================
+   MODAL ACTIONS
+   ---------------------------------------------------------
+   The buttons used to sit flush against the text above them, so
+   on a results sheet the "Next level" button looked like part of
+   the stats row. A hairline rule plus real separation makes the
+   action stack read as its own block.
+   ========================================================= */
 .overlay .actions{
-  display:flex;flex-direction:column;gap:9px;margin-top:0;
+  display:flex;flex-direction:column;
+  gap:clamp(8px,1.4vh,11px);
+  margin-top:clamp(10px,1.8vh,16px);
+  padding-top:clamp(10px,1.8vh,16px);
+  border-top:1px solid rgba(255,255,255,.08);
 }
 .overlay .actions .btn{
-  width:100%;padding:clamp(12px,1.9vh,15px) 18px;
-  border-radius:14px;font-size:clamp(14px,1.9vh,16px);
+  width:100%;
+  padding:clamp(12px,1.9vh,15px) 18px;
+  border-radius:14px;
+  font-size:clamp(14px,1.9vh,16px);
 }
 
 /* touch — PHYSICAL sides, never flipped by dir=rtl
@@ -599,7 +655,16 @@ html[dir="rtl"] .btn.primary::after{
 }
 .tbtn.jump .ic{width:40%;height:40%;color:#fff0d4}
 
-.about{font-size:14px;line-height:1.95;color:#cfc0ad;white-space:pre-line}
+/* the About text is long — it must scroll inside its sheet, and
+   it must breathe while doing so */
+.about{
+  font-size:clamp(13px,1.8vh,14.5px);
+  line-height:2.05;
+  color:#cfc0ad;
+  white-space:pre-line;
+  text-align:start;
+  padding-block:2px;
+}
 
 /* ============ TUTORIAL CARD ============ */
 /* =========================================================
@@ -630,6 +695,30 @@ html[dir="rtl"] .btn.primary::after{
 #tut[hidden]{display:none}
 #tut.show{opacity:1;transform:translateY(0)}
 #tut.muted{opacity:.18}
+/* =========================================================
+   HAZARD CARD
+   ---------------------------------------------------------
+   The same card, a different job. The controls tutorial is a
+   sequence the player walks through; a hazard card is a single
+   one-off note that appears the first time they meet a saw, a
+   nail row, a rising stone and so on.
+
+   It borrows the card's surface but drops the sequence chrome —
+   no dots, no arrows — and gets a warmer border so it reads as
+   a warning rather than a lesson.
+   ========================================================= */
+#tut.hazard .tut-card{
+  border-color:rgba(255,150,90,.42);
+  background:linear-gradient(165deg,rgba(44,26,20,.95),rgba(14,9,12,.97));
+  box-shadow:0 16px 44px rgba(0,0,0,.62),inset 0 1px 0 rgba(255,255,255,.07);
+  cursor:pointer;
+}
+#tut.hazard .tut-label{color:#ffb98a}
+#tut.hazard .tut-label::after{content:' · تحذير'}
+html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
+#tut.hazard #tut-title{color:#ffe0c8}
+#tut.hazard .tut-foot{display:none}
+#tut.hazard .tut-hint{display:none}
 /* =========================================================
    TUTORIAL CARD
    ---------------------------------------------------------

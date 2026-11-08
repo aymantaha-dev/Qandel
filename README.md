@@ -62,6 +62,18 @@ total, with three stars available per level.
 - **Deterministic level generation.** All twenty-five levels are built at
   load time from a seeded PRNG, so every player gets the exact same layouts
   every time.
+- **Nine hazard families, all present from level 1.** Spikes, fire, lava,
+  saws, nails, rising stones, falling stones, fragile platforms and moving
+  platforms. Every one is taught in a survivable form and then scaled —
+  count, speed, travel and fuse all read the level's difficulty index.
+- **Contextual hazard cards.** The first time the player meets a saw, a nail
+  row, a rising stone, a falling stone or a fragile platform, a card explains
+  it — once, in place, without pausing. Persisted, so it never repeats.
+- **Variable-timing traps.** Fragile platforms and rising stones carry a
+  per-instance fuse and a `respawn` flag, so roughly half of them return and
+  half never do. The player learns the rule, not a memorised sequence.
+- **A fairness floor on every fuse.** Nothing crumbles in under 0.30 s of
+  contact, enforced at the builder level rather than per-template.
 - **Validated geometry.** Nothing is placed in a level without passing a
   collision and fairness check first. No unreachable platforms, no hazards
   hidden under a drop-off, no checkpoints floating in the void.
@@ -147,18 +159,59 @@ sharing a flat multiplier with an easy opening level.
 
 ### Hazards
 
-| Hazard | Behaviour |
-| --- | --- |
-| Spikes | Static, always lethal |
-| Fire | Pulsing flame, active roughly 57% of its cycle |
-| Lava | Static pool, always lethal |
-| Fragile platforms | Crumble 0.55 s after being stood on |
-| Falling out of the world | Lethal |
+Nine hazard families. **Every one of them appears from level 1**, in its
+simplest survivable form; what scales with difficulty is count, speed, size
+and timing — never the rule itself.
 
-Every hazard is drawn so it reads as danger before the player reaches it.
-Fragile platforms always show hairline cracks, which widen and glow during
-the countdown. Fire lights its own surroundings through the darkness layer,
-so a hazard is never invisible.
+| Hazard | Behaviour | Tell |
+| --- | --- | --- |
+| Spikes | Static row, always lethal | Dark base wedge with a lit bevel and a hard specular tip |
+| Fire | Pulsing flame, active ~57% of its cycle | Embers drift even while it is out, so the pit stays visible |
+| Lava | Static pool, always lethal | Molten body with a bright surface band and rising heat haze |
+| Saws | Spinning blade on a fixed patrol path (`x`, `y` or orbit) | Twelve real teeth, a hot rim and a hazard glow |
+| Nails | Dense short metal rows, floor (`dir 1`) or ceiling (`dir -1`) | Thinner and brighter than spikes, with a visible base rail |
+| Rising stones | Erupt from the floor near the player, then crumble after a fuse | A dust plume while climbing, then the same crack-and-glow as a fragile platform |
+| Falling stones | Hang from the ceiling, drop when the player passes under | A dashed red rail showing exactly where they will land |
+| Fragile platforms | Crumble a variable time after being stood on | Hairline cracks are always visible; they widen and glow during the countdown |
+| Moving platforms | Carry the player over voids | Chains above, a lit underside, direction chevrons on the deck |
+| Falling out of the world | Lethal | — |
+
+**Fairness floor.** No fragile surface may vanish in under `TUNE.FUSE_MIN`
+(0.30 s) of contact. Below that the player physically cannot react, and the
+death stops being their fault. Every fuse in the game is clamped to that
+value inside `Builder.crumb()` and `Builder.riser()`.
+
+**Visibility.** Every hazard punches its own hole in the darkness layer, so
+the lantern reveals it before it can kill you. A hazard you cannot see is not
+a hazard, it is a trap.
+
+**Variation, not randomness.** Fragile platforms carry a per-platform fuse
+and a `respawn` flag — roughly half of them come back after a cooldown, half
+never do. Rising stones do the same. The result is a chain that cannot be
+memorised as a fixed shape: the player learns the *rule* (keep moving) rather
+than the *timing* of one specific platform.
+
+### Teaching the hazards
+
+The controls tutorial is a six-step sequence that runs once, on level 1.
+The hazards are taught separately, and contextually:
+
+- Each of the six hazard families (spikes, saws, nails, rising stones,
+  falling stones, fragile platforms) has its own card.
+- A card fires the **first time the player actually sees** that hazard —
+  on any level, at any point in the run — when it is within about 1.5
+  screens ahead of them.
+- Each card fires **at most once, ever**, and the fact is persisted in
+  `save.tutorialSeen`, so a returning player is never told about saws again
+  on level 12.
+- The card never pauses the game. It is a small card in the corner, it
+  auto-dismisses after seven seconds, and tapping it dismisses it early.
+- Cards never interrupt the controls tutorial: while `TUT.active` is true
+  the hazard driver stands down.
+
+The reasoning is simple: a card explaining saws is only useful while the
+player is looking at a saw. Twelve cards dumped on level 1 would be a wall
+of text nobody reads.
 
 ---
 
@@ -180,9 +233,24 @@ palette. The music tempo rises slightly with the world index.
 
 ### Levels
 
-Twenty-five levels, five per world, with a difficulty band that ramps from
-0.08 to 0.88 across the set. Level width grows from 8,400 to 11,600 world
-units.
+Twenty-five levels, five per world. Level width grows from 8,400 to 11,600
+world units.
+
+**Difficulty curve.** A convex ramp, `0.14 + (index/24)^1.30 * 0.86`, clamped
+to 1.00:
+
+| Level | `baseDiff` | What it feels like |
+| --- | --- | --- |
+| 1 | 0.14 | One slow saw, one short nail row, one wide riser — a teaching level |
+| 5 | 0.26 | Two of each, faster; fire and lava arrive |
+| 10 | 0.42 | Fragile chains, moving platforms, ceiling nails |
+| 15 | 0.60 | Rising stones over voids, falling stones begin |
+| 20 | 0.80 | Four saws, six nail rows, tight fuses |
+| 25 | 1.00 | Everything at maximum: fastest blades, shortest fuses, densest mix |
+
+The floor of 0.14 (was 0.10) means even level 1 has a real hazard mix rather
+than empty ground, and the `^1.30` exponent makes the last five levels climb
+steeply enough to feel like a different game from the opening.
 
 <details>
 <summary>Full level list</summary>
@@ -365,9 +433,10 @@ for lookup, `applyI18n()` to walk every `[data-i18n]` element, and
 `setLang()` to switch and persist the choice.
 
 **`levels.js`** defines the five worlds, the tuning constants, a seeded
-PRNG, the `Builder` class with its placement and validation API, eight
-segment templates, the segment picker, and the assembly routine that produces
-all twenty-five levels at load.
+PRNG, the `Builder` class with its placement and validation API (including
+the four new hazard families), thirteen segment templates, the segment
+picker, and the assembly routine that produces all twenty-five levels at
+load.
 
 **`game.js`** is a single IIFE in strict mode. It owns the canvas, the game
 state, the physics step, the render pipeline, the audio engines, input
@@ -407,8 +476,10 @@ Each frame is drawn in three passes.
    at a constant vertical field of view. Inside this pass: sky gradient,
    atmospheric layer, stars, far silhouettes, mid parallax, then everything
    inside the camera window — platforms, moving platforms, ceilings, lava,
-   fragile platforms, spikes, checkpoints, the goal, gems, flasks, the player,
-   fire, particles.
+   fragile platforms, rising stones, spikes, nails, falling stones,
+   checkpoints, the goal, gems, flasks, the player, fire, particles, and
+   finally the saws — drawn last so a blade always reads as being in front of
+   the player.
 
 2. **Darkness pass.** A separate offscreen canvas is filled with a translucent
    dark overlay, then punched through with `destination-out` at the player's
@@ -440,8 +511,8 @@ footprint. That last rule is what prevents a floating platform from sitting
 just above a fire, where the player would drop off it straight into flames
 with no chance to react.
 
-**Segments.** Eight templates, each self-contained and each guaranteed to end
-on solid ground:
+**Segments.** Thirteen templates, each self-contained and each guaranteed to
+end on solid ground:
 
 | Segment | Shape |
 | --- | --- |
@@ -449,15 +520,29 @@ on solid ground:
 | `gap` | Floors separated by jumpable gaps |
 | `stairs` | Rising or falling staircase |
 | `island` | Floating islands over a void |
-| `lava` | A pool crossed on stepping stones |
+| `nails` | Floor rows plus ceiling slabs with hanging nails |
+| `saws` | Blades patrolling the floor line; the floor breaks up at high difficulty |
 | `corridor` | A low ceiling that forces careful jumps |
 | `mover` | A chasm crossed on moving platforms |
-| `crumble` | A chain of fragile platforms |
+| `lava` | A pool crossed on stepping stones |
+| `crumble` | A chain of fragile platforms with variable fuses |
+| `rise` | A void crossed on stones that erupt from the floor |
+| `crushers` | A hall of stones that drop from the ceiling |
+| `gauntlet` | Saw → nails → riser → crusher → saw, in one readable run |
 
-Each has an `unlockAt` difficulty threshold, so mechanics are introduced in
-order rather than all at once. The picker never repeats the same template
-twice in a row, and gives a temporary weight boost to a template that has
-just unlocked so the player actually meets the new mechanic.
+**Every family is available from level 1.** The previous table gated each
+mechanic behind a high `unlockAt`, so a player could finish a third of the
+game without ever meeting the saws. The new rule is the opposite: `unlockAt`
+values run from 0.00 to 0.30, which every level satisfies, and the segment
+functions themselves read `diff` and scale count, speed, travel and fuse. A
+level-1 saw run is one slow blade over open ground; a level-25 saw run is
+four fast ones over a floor that is no longer continuous.
+
+The picker never repeats the same template twice in a row, and gives a
+temporary weight boost to a template that has just unlocked so the player
+actually meets the new mechanic. `run` and `gap` weights *decay* with
+difficulty (1.60 → 0.50), so the back half of the game is genuinely dense
+instead of mostly open floor.
 
 **Ordering matters.** Inside several templates the order of placement is
 load-bearing. In `run`, floating platforms are placed before hazards so the
@@ -599,8 +684,24 @@ The render loop was written with allocation pressure in mind, because at
 - `game.js` — physics: `GRAV`, `MAXFALL`, `SPEED`, `ACC`, `FRIC`, `JUMPV`,
   `JUMPV2`, `MAX_JUMPS`, `MAX_HEARTS`.
 - `levels.js` — geometry and generation: `TUNE` (ground height, gaps,
-  headroom, checkpoint spacing, oil spacing) and `SEGMENTS` (per-template
-  minimum width and unlock threshold).
+  headroom, checkpoint spacing, oil spacing, plus one block per hazard
+  family), `QUOTA` (the guaranteed minimum of each family), and `SEGMENTS`
+  (per-template minimum width and unlock threshold).
+
+**Tuning a hazard family.** Each of the four new families owns a block in
+`TUNE`:
+
+| Block | Constants |
+| --- | --- |
+| `SAW_*` | `SAW_R`, `SAW_DIST`, `SAW_SPEED` |
+| `NAIL_*` | `NAIL_H`, `NAIL_STEP` |
+| `RISER_*` | `RISER_H`, `RISER_SPEED` |
+| `CRUSH_*` | `CRUSH_H`, `CRUSH_DROP`, `CRUSH_SPEED` |
+| `FUSE_*` | `FUSE_MIN`, `FUSE_MAX`, `CRUMB_RESPAWN` |
+
+Raising `FUSE_MIN` makes every fragile surface in the game more forgiving at
+once; lowering `CRUSH_SPEED` slows every falling stone. No segment code needs
+to change.
 
 **Adding a world** means pushing an entry into `WORLDS` in `levels.js` with
 its palette and `archStyle`, then adding a matching `archStyle` branch in
