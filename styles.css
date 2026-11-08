@@ -602,26 +602,133 @@ html[dir="rtl"] .btn.primary::after{
 .about{font-size:14px;line-height:1.95;color:#cfc0ad;white-space:pre-line}
 
 /* ============ TUTORIAL CARD ============ */
+/* =========================================================
+   TUTORIAL ANCHOR
+   ---------------------------------------------------------
+   The card is pinned to the top-inline-end corner, but it must
+   never be able to run off the BOTTOM of the screen. The old
+   rule only set a top offset, so on a short viewport the card's
+   own height pushed its footer past the visible area.
+
+   `max-height` here is expressed against the space left BELOW
+   the top offset, so the card is bounded by the viewport no
+   matter how tall its content is. The card itself then decides
+   how much of that it uses.
+   ========================================================= */
 #tut{
   position:absolute;z-index:16;pointer-events:none;
-  inset-block-start:clamp(64px,11vh,96px);
-  inset-inline-end:clamp(14px,2.4vw,28px);
-  max-width:min(330px,72vw);
+  inset-block-start:clamp(56px,10dvh,92px);
+  inset-inline-end:clamp(12px,2.4vw,28px);
+  max-width:min(340px,74vw);
+  /* never taller than the room between the top offset and the
+     bottom of the visible viewport */
+  max-height:calc(100dvh - clamp(56px,10dvh,92px) - clamp(16px,3dvh,40px));
+  display:flex;flex-direction:column;
   opacity:0;transform:translateY(-8px);
   transition:opacity .3s ease,transform .3s ease;
 }
 #tut[hidden]{display:none}
 #tut.show{opacity:1;transform:translateY(0)}
 #tut.muted{opacity:.18}
+/* =========================================================
+   TUTORIAL CARD
+   ---------------------------------------------------------
+   The card had no height limit and no internal scroll, so on a
+   short screen the paragraph simply ran past the rounded border
+   and the rest of the text was unreachable — there was nothing
+   to scroll, because the card itself was not a scroll container.
+
+   Now the card is a three-part column: a fixed header, a
+   scrollable body, and a fixed footer with the dots and the
+   next/prev buttons. The body is the only part that scrolls, so
+   the controls never move out of reach.
+
+   SIZING — why `dvh` and not `vh`
+   -------------------------------
+   `vh` on a phone is the LARGEST the viewport can be, i.e. the
+   height with the URL bar hidden. A card capped at `56vh` can
+   therefore be taller than the screen the player is actually
+   looking at, and its footer buttons end up under the browser
+   chrome. `dvh` tracks the visible height, so the card always
+   fits what is on screen.
+
+   The card also has a FLOOR as well as a ceiling: on a very tall
+   screen it should not stretch to half the display, and on a
+   very short one it must not collapse to a sliver. `clamp()`
+   gives it a comfortable middle.
+   ========================================================= */
 .tut-card{
   pointer-events:auto;
-  background:linear-gradient(165deg,rgba(30,21,42,.92),rgba(12,9,20,.94));
+  display:flex;flex-direction:column;
+
+  /* ceiling: never taller than the visible viewport allows */
+  max-height:clamp(150px, 52dvh, 400px);
+  /* and never wider than the space the card is given */
+  max-width:100%;
+
+  background:linear-gradient(165deg,rgba(30,21,42,.94),rgba(12,9,20,.96));
   border:1px solid rgba(255,201,120,.22);
   border-radius:16px;
   padding:13px 15px 12px;
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   box-shadow:0 16px 44px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);
+  overflow:hidden;
 }
+/* =========================================================
+   THE SCROLL REGION
+   ---------------------------------------------------------
+   `min-height:0` is not cosmetic. A flex item's default
+   `min-height` is `auto`, which resolves to its CONTENT height —
+   so the item refuses to shrink below its text, the card
+   overflows, and `overflow-y:auto` never has anything to scroll.
+   That is exactly why the text was unreachable before.
+
+   With `min-height:0` the item is allowed to be shorter than its
+   content, which is the precondition for a scrollbar to appear.
+
+   `flex:1 1 auto` lets it take the leftover space after the
+   header and footer, and give it back on a short screen.
+   ========================================================= */
+.tut-scroll{
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;overflow-x:hidden;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+  padding-inline-end:2px;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(255,201,120,.35) transparent;
+}
+/* a little breathing room so the last line never sits flush
+   against the footer rule */
+.tut-scroll > *:last-child{margin-bottom:2px}
+.tut-scroll::-webkit-scrollbar{width:4px}
+.tut-scroll::-webkit-scrollbar-track{background:transparent}
+.tut-scroll::-webkit-scrollbar-thumb{
+  background:rgba(255,201,120,.35);border-radius:99px;
+}
+/* footer: dots on one side, navigation on the other */
+.tut-foot{
+  flex:0 0 auto;
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;margin-top:10px;
+}
+.tut-nav{display:flex;align-items:center;gap:6px}
+.tut-btn{
+  width:28px;height:28px;display:grid;place-items:center;
+  border-radius:9px;cursor:pointer;
+  border:1px solid rgba(255,201,120,.28);
+  background:rgba(255,255,255,.05);
+  color:var(--gold);
+  transition:background .15s,border-color .15s,transform .1s,opacity .15s;
+  touch-action:manipulation;
+}
+.tut-btn .ic{width:13px;height:13px}
+.tut-btn:hover{background:rgba(255,201,120,.16);border-color:rgba(255,201,120,.55)}
+.tut-btn:active{transform:scale(.92)}
+.tut-btn:disabled{opacity:.28;cursor:default;transform:none}
+.tut-btn:disabled:hover{background:rgba(255,255,255,.05);border-color:rgba(255,201,120,.28)}
 .tut-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
 .tut-label{
   font-size:10px;font-weight:800;letter-spacing:.16em;color:var(--gold);
@@ -635,7 +742,7 @@ html[dir="rtl"] .btn.primary::after{
 .tut-skip:hover{color:var(--txt);background:rgba(255,255,255,.07)}
 #tut-title{font-size:14px;font-weight:900;color:#ffe9c8;margin-bottom:5px;line-height:1.35}
 #tut-body{font-size:12.5px;line-height:1.75;color:#cfc0ad}
-.tut-dots{display:flex;gap:5px;margin-top:10px}
+.tut-dots{display:flex;gap:5px}
 .tut-dots i{
   width:6px;height:6px;border-radius:99px;background:rgba(255,255,255,.16);
   transition:background .25s,width .25s;
@@ -643,12 +750,66 @@ html[dir="rtl"] .btn.primary::after{
 .tut-dots i.done{background:rgba(255,201,120,.5)}
 .tut-dots i.now{background:var(--gold);width:16px}
 .tut-hint{
+  flex:0 0 auto;
   margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);
   font-size:10.5px;color:var(--muted);line-height:1.6;
 }
+/* =========================================================
+   TUTORIAL — SMALL AND SHORT SCREENS
+   ---------------------------------------------------------
+   Three breakpoints, because the card has three different
+   failure modes:
+
+     · narrow landscape phone  → the card eats the play area
+     · short landscape phone   → the footer falls off the bottom
+     · very short (split view) → only the scroll region survives
+
+   Each one shrinks the chrome, never the text, so the copy stays
+   readable and only the padding and the hint line give way.
+   ========================================================= */
 @media (max-width:760px){
-  #tut{max-width:min(280px,64vw);inset-block-start:60px}
+  #tut{
+    max-width:min(300px,70vw);
+    inset-block-start:52px;
+    max-height:calc(100dvh - 52px - 14px);
+  }
   #tut-body{font-size:11.5px}
+  .tut-card{padding:11px 12px 10px;border-radius:14px}
+  .tut-btn{width:26px;height:26px}
+}
+
+/* short landscape — the height is the scarce resource */
+@media (max-height:520px){
+  #tut{
+    inset-block-start:46px;
+    max-width:min(320px,58vw);
+    max-height:calc(100dvh - 46px - 10px);
+  }
+  .tut-card{padding:9px 11px 8px;max-height:none}
+  #tut-title{font-size:12.5px;margin-bottom:3px}
+  #tut-body{font-size:11px;line-height:1.6}
+  .tut-hint{display:none}          /* the tip is the first thing to go */
+  .tut-foot{margin-top:6px}
+  .tut-btn{width:24px;height:24px}
+  .tut-btn .ic{width:11px;height:11px}
+}
+
+/* very short — keep only the essentials, and let the body scroll */
+@media (max-height:380px){
+  #tut{
+    inset-block-start:40px;
+    max-width:min(300px,52vw);
+    max-height:calc(100dvh - 40px - 8px);
+  }
+  .tut-card{padding:7px 9px 7px}
+  .tut-top{margin-bottom:4px}
+  .tut-label{font-size:9px}
+  #tut-title{font-size:11.5px}
+  #tut-body{font-size:10.5px;line-height:1.55}
+  .tut-dots i{width:5px;height:5px}
+  .tut-dots i.now{width:13px}
+  .tut-btn{width:22px;height:22px;border-radius:7px}
+  .tut-btn .ic{width:10px;height:10px}
 }
 
 /* =========================================================

@@ -346,31 +346,103 @@ function segGap(B, x0, w, diff, rnd){
   return end;
 }
 
-/* 3 · STAIRS — a rising or falling staircase */
+/* =========================================================
+   3 · STAIRS — a rising or falling staircase
+   ---------------------------------------------------------
+   THE BUG THIS REPLACES
+   ---------------------
+   The old version computed each step's y, then clamped it:
+
+       py = 500 - (i+1)*rise
+       cy = Math.max(250, Math.min(480, py))
+
+   Two things went wrong with that.
+
+   1. The clamp silently FLATTENED the staircase. Once the
+      unclamped y went above 250, every remaining step clamped to
+      exactly 250 — so the top half of the stairs became one
+      horizontal shelf hanging in mid-air, and the player had to
+      make a single impossible vertical leap to reach it.
+
+   2. The descending branch was worse. It started at
+      `500 - steps*rise`, i.e. the HIGHEST point of the whole
+      flight, so a long flight began above the ceiling limit and
+      the first step was already clamped. The "stairs" then read
+      as a platform floating at the top of the screen.
+
+   THE FIX
+   -------
+   Work out the TOTAL height of the flight first, then derive a
+   per-step rise that fits inside the legal band. The staircase is
+   therefore always complete, always reachable, and never
+   collapses into a shelf.
+
+   The legal band is:
+     bottom  : GROUND_Y (500) — the flight must start on the floor
+     top     : the highest a double jump can comfortably reach,
+               minus clearance, so the last step is always landable
+   ========================================================= */
 function segStairs(B, x0, w, diff, rnd){
   const up = rnd() > 0.45;
+
+  /* how many steps fit in this segment */
   const steps = Math.max(3, Math.floor(w/130));
   const stepW = w / steps;
-  const rise = 45 + diff*15;
+
+  /* ---------------------------------------------------------
+     THE BAND
+     A double jump clears roughly 260 units of height, but the
+     player also needs horizontal room and a landing margin. 200
+     is the highest step top that is comfortably reachable from
+     the floor without a perfect input, so that is the ceiling of
+     the flight.
+     --------------------------------------------------------- */
+  const FLOOR_Y = TUNE.GROUND_Y;      /* 500 */
+  const TOP_Y   = 300;                /* highest step top allowed */
+  const MAX_TOTAL_RISE = FLOOR_Y - TOP_Y;   /* 200 */
+
+  /* the flight's total height: never more than the band allows,
+     and it grows with difficulty so late levels feel taller */
+  const wantRise = 90 + diff * 110;                  /* 90 .. 200 */
+  const totalRise = Math.min(MAX_TOTAL_RISE, wantRise);
+
+  /* per-step rise — derived from the total, never clamped after */
+  const rise = totalRise / steps;
+
   for(let i=0;i<steps;i++){
     const px = x0 + i*stepW;
-    let py;
-    if(up) py = 500 - (i+1)*rise;
-    else   py = 500 - (steps-i)*rise;
-    const cy = Math.max(250, Math.min(480, py));
+
+    /* -------------------------------------------------------
+       Both directions are now built from the SAME total rise,
+       so neither can overshoot the band.
+
+       ascending : step 0 sits one rise above the floor, the last
+                   step sits `totalRise` above it.
+       descending: step 0 sits `totalRise` above the floor, the
+                   last step sits one rise above it — i.e. the
+                   flight starts high and walks DOWN to the floor,
+                   which is the opposite of the old behaviour.
+       ------------------------------------------------------- */
+    const py = up
+      ? FLOOR_Y - (i + 1) * rise
+      : FLOOR_Y - (steps - i) * rise;
+
+    /* a final safety clamp — with the maths above it can never
+       trigger, but it costs nothing and guarantees the invariant */
+    const cy = Math.max(TOP_Y, Math.min(FLOOR_Y - rise, py));
+
     if(B.plat(px, cy, stepW*0.72, 22)){
       if(rnd() > 0.35) B.gem(px + stepW*0.36, cy - 46);
     }
   }
+
   /* ---------------------------------------------------------
      The landing floor must OVERLAP the next segment, not just
-     touch it. The old version ended exactly where the next
-     segment began, which left the player standing on a bare
-     edge with a gap right behind it.
+     touch it — otherwise the player stands on a bare edge with a
+     gap right behind it.
      --------------------------------------------------------- */
   B.floor(x0 + w*0.80, w*0.20 + 60);
-  /* stop 60 units short so the next segment starts on solid
-     ground rather than at the very lip of this one */
+
   return x0 + w;
 }
 

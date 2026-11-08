@@ -26,70 +26,22 @@ const qs=s=>document.querySelector(s);
 const qa=s=>Array.prototype.slice.call(document.querySelectorAll(s));
 
 /* =========================================================
-   FULLSCREEN
+   NO FULLSCREEN API
    ---------------------------------------------------------
-   Declared HERE, at the top, on purpose.
+   The Fullscreen API was removed on purpose.
 
-   `window.onLangApplied` calls `syncFullscreenBtn()`, and
-   `applyI18n()` runs `onLangApplied` during boot — before the
-   button-wiring block near the bottom of the file. With these
-   definitions sitting down there, that boot call hit a
-   ReferenceError (temporal dead zone) and killed the whole
-   IIFE before the game ever started.
+   The game now ships as an installable PWA with
+   `display: "standalone"` in the manifest. That is what gives a
+   chrome-free app window on Android and iOS — the browser
+   toolbar is simply not part of the app. Calling
+   `requestFullscreen()` on top of that produced a *second*,
+   competing layout mode: the viewport changed size underneath a
+   page whose CSS had already been measured, the menu grid
+   collapsed into one corner, and the canvas kept stale
+   dimensions until something forced a reflow.
 
-   Anything that boot-time code can reach must be defined above
-   the boot call. This block is that.
+   One mode is better than two. The app window is the mode.
    ========================================================= */
-const FS = {
-  supported: !!(document.documentElement.requestFullscreen ||
-                document.documentElement.webkitRequestFullscreen ||
-                document.documentElement.webkitRequestFullScreen ||
-                document.documentElement.msRequestFullscreen),
-  isOn(){
-    return !!(document.fullscreenElement || document.webkitFullscreenElement ||
-              document.msFullscreenElement);
-  },
-  /* must be called from inside a user-gesture handler */
-  enter(){
-    if(this.isOn()) return;
-    const el = document.documentElement;
-    const rq = el.requestFullscreen || el.webkitRequestFullscreen ||
-               el.webkitRequestFullScreen || el.msRequestFullscreen;
-    if(!rq) return;
-    try{
-      const p = rq.call(el, { navigationUI: 'hide' });
-      /* Chrome returns a promise; Safari's old webkit call returns nothing */
-      if(p && p.catch) p.catch(function(){ /* refused — stay in the tab */ });
-    }catch(e){ /* refused — stay in the tab */ }
-  },
-  exit(){
-    const ex = document.exitFullscreen || document.webkitExitFullscreen ||
-               document.msExitFullscreen;
-    if(!ex) return;
-    try{
-      const p = ex.call(document);
-      if(p && p.catch) p.catch(function(){});
-    }catch(e){}
-  },
-  toggle(){ if(this.isOn()) this.exit(); else this.enter(); }
-};
-
-/* keep the settings row label honest as the state changes.
-   Guarded: the button may not exist yet on the very first boot
-   call, and `t()` is a global from i18n.js — if either is
-   missing we simply do nothing instead of throwing. */
-function syncFullscreenBtn(){
-  const btn = qs('#btn-fullscreen');
-  if(!btn) return;
-  const span = btn.querySelector('span');
-  const ico  = btn.querySelector('use');
-  const on   = FS.isOn();
-  if(span) span.textContent = on ? t('settings.fullscreenOn') : t('settings.fullscreenBtn');
-  if(ico)  ico.setAttribute('href', on ? '#i-collapse' : '#i-expand');
-  btn.classList.toggle('on', on);
-}
-document.addEventListener('fullscreenchange', syncFullscreenBtn);
-document.addEventListener('webkitfullscreenchange', syncFullscreenBtn);
 
 function rr(c,x,y,w,h,r){
   c.beginPath();
@@ -371,12 +323,51 @@ const keys={left:false,right:false,jump:false,jumpPressed:false};
 /* ---------------- canvas sizing (full-bleed, world-space) ---------------- */
 const BASE_H = 540;
 function resize(){
-  const w=window.innerWidth, h=window.innerHeight;
+  /* =========================================================
+     MEASURE THE STAGE, NOT THE WINDOW
+     ---------------------------------------------------------
+     `window.innerWidth/innerHeight` is the viewport — but the
+     canvas does not fill the viewport. It fills #stage, which
+     sits inside a safe-area padding and, on a phone, inside a
+     rotated wrapper.
+
+     Measuring the window therefore produced a VW/VH that was
+     LARGER than the box the canvas actually occupied. The
+     canvas backing store was sized for the bigger number while
+     CSS scaled it down into the smaller box, so the world was
+     drawn at the wrong scale and the camera limits were wrong
+     too. On a wide screen with a safe-area inset, that is
+     exactly the "everything squeezed to one side" look.
+
+     `getBoundingClientRect()` on #stage returns the real painted
+     box, after padding, after transforms. That is the number the
+     canvas must match.
+     ========================================================= */
+  const stage = document.getElementById('stage');
+  const rect = stage ? stage.getBoundingClientRect() : null;
+
+  let w = rect ? Math.round(rect.width)  : window.innerWidth;
+  let h = rect ? Math.round(rect.height) : window.innerHeight;
+
+  /* a zero-size box means the layout has not settled yet — keep
+     the previous values rather than dividing by zero downstream */
+  if(w < 2 || h < 2){
+    w = window.innerWidth;
+    h = window.innerHeight;
+  }
+
   DPR=Math.min(window.devicePixelRatio||1, 2);
 
-  /* portrait phones: rotate the whole stage 90° so the game is always landscape */
+  /* Portrait phones rotate the whole stage 90° in CSS, so the
+     stage's own rect is already the rotated box. Only the
+     UNROTATED case needs the axes swapped, and the stage rect
+     tells us which case we are in. */
   const portrait = (h > w*1.02);
   document.body.classList.toggle('rotated', portrait);
+
+  /* When rotated, the CSS transform swaps the painted axes: the
+     stage is `100dvh` wide and `100dvw` tall before rotation, so
+     the visible box is (h × w), not (w × h). */
   const vw = portrait ? h : w;
   const vh = portrait ? w : h;
 
@@ -410,29 +401,34 @@ window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
 
 /* =========================================================
-   FULLSCREEN RESIZE
+   RESIZE THAT ACTUALLY LANDS
    ---------------------------------------------------------
-   Entering fullscreen changes the viewport, but `resize` is not
-   guaranteed to fire after the layout has settled — Chrome fires
-   it once, mid-transition, when innerWidth/innerHeight are still
-   the old values. The canvas then keeps a stale VW/VH, and the
-   CSS grid squeezes the menu into one corner.
+   A single `resize` event is not enough. The browser fires it
+   while the layout is still settling — the safe-area insets, the
+   dvh value and the rotated wrapper all resolve a frame or two
+   later — so `getBoundingClientRect()` returns an intermediate
+   size and the canvas keeps it.
 
-   So: on every fullscreen transition, re-run resize on the next
-   frame AND once more after the transition has finished. Two
-   passes is cheap and covers both engines that fire early and
-   engines that fire late.
+   Three passes: next frame, then after the transition settles,
+   then a late safety pass. Each one is a cheap rect read plus a
+   canvas resize, and together they cover every engine's timing.
    ========================================================= */
-function refitAfterFullscreen(){
+function refit(){
   requestAnimationFrame(function(){
     resize();
-    /* the browser's own chrome animation can still be running */
-    setTimeout(resize, 120);
-    setTimeout(resize, 400);
+    setTimeout(resize, 90);
+    setTimeout(resize, 320);
   });
 }
-document.addEventListener('fullscreenchange', refitAfterFullscreen);
-document.addEventListener('webkitfullscreenchange', refitAfterFullscreen);
+window.addEventListener('resize', refit);
+window.addEventListener('orientationchange', refit);
+window.addEventListener('pageshow', refit);
+
+/* the visual viewport is the one that actually changes when a
+   mobile browser hides its toolbar — window.resize often misses it */
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', refit);
+}
 
 /* ---------------- level load ---------------- */
 function loadLevel(i){
@@ -2663,9 +2659,32 @@ const TUT = {
     this.bodyEl  = qs('#tut-body');
     this.dotsEl  = qs('#tut-dots');
     this.hintEl  = qs('#tut-hint');
+    this.scrollEl= qs('#tut-scroll');
+    this.prevEl  = qs('#tut-prev');
+    this.nextEl  = qs('#tut-next');
+
     qs('#tut-skip').addEventListener('click', () => {
       AU.click(); this.hide(true);
     });
+
+    /* Manual navigation. The card used to advance only when the
+       player performed the action, which meant a step could never
+       be re-read and the text could not be scrolled through on a
+       short screen. Now the arrows work too, and they are the
+       primary way to move on. */
+    if(this.prevEl) this.prevEl.addEventListener('click', () => {
+      AU.click(); this.go(this.step - 1);
+    });
+    if(this.nextEl) this.nextEl.addEventListener('click', () => {
+      AU.click();
+      if(this.step >= this.steps.length - 1) this.hide(false);
+      else this.go(this.step + 1);
+    });
+  },
+  go(i){
+    if(!this.active) return;
+    this.step = Math.max(0, Math.min(this.steps.length - 1, i));
+    this.render();
   },
   start(){
     if(!this.root) return;
@@ -2689,12 +2708,20 @@ const TUT = {
     this.titleEl.textContent = t('tut.'+s.key+'.title');
     this.bodyEl.textContent  = t('tut.'+s.key+'.body');
     if(this.hintEl) this.hintEl.textContent = t('tut.hint');
+
+    /* a new step always starts at the top of its own text */
+    if(this.scrollEl) this.scrollEl.scrollTop = 0;
+
     /* progress dots */
     let html = '';
     for(let i=0;i<this.steps.length;i++){
       html += '<i class="'+(i < this.step ? 'done' : (i === this.step ? 'now' : ''))+'"></i>';
     }
     this.dotsEl.innerHTML = html;
+
+    /* the arrows reflect where you are in the sequence */
+    if(this.prevEl) this.prevEl.disabled = (this.step === 0);
+    if(this.nextEl) this.nextEl.disabled = false;
   },
   advance(){
     if(!this.active) return;
@@ -2985,8 +3012,6 @@ if('serviceWorker' in navigator && location.protocol !== 'file:'){
 /* ---------------- buttons ---------------- */
 qs('#btn-play').addEventListener('click', function(){
   AU.click(); AU.init();
-  /* this click is the user gesture the Fullscreen API needs */
-  FS.enter();
   startLevel(nextUnlocked());
 });
 qs('#btn-levels').addEventListener('click', function(){ AU.click(); show('scr-levels'); renderLevels(); });
@@ -3038,22 +3063,6 @@ qs('#btn-reset').addEventListener('click', function(){
   }, 1400);
 });
 
-/* The fullscreen row only exists in builds that ship the PWA markup.
-   Wiring it unconditionally would throw on a null element and abort
-   every listener below it — which would take out pause, next, retry
-   and home with it. Guarded, and the row is hidden if absent. */
-const fsBtn = qs('#btn-fullscreen');
-if(fsBtn){
-  fsBtn.addEventListener('click', function(){
-    AU.click();
-    FS.toggle();
-    /* the label flips on the fullscreenchange event, but some engines
-       are slow to fire it — sync once now so the button never lies */
-    setTimeout(syncFullscreenBtn, 120);
-  });
-  syncFullscreenBtn();
-}
-
 qs('#btn-pause').addEventListener('click', function(){ AU.click(); togglePause(); });
 qs('#btn-resume').addEventListener('click', function(){ AU.click(); togglePause(); });
 qs('#btn-restart').addEventListener('click', function(){ AU.click(); startLevel(S.level); });
@@ -3079,7 +3088,6 @@ function goMenu(){ show('scr-menu'); renderLevels(); MUS.stop(); }
 window.onLangApplied=function(){
   try{ syncSettings(); }catch(e){}
   try{ renderLevels(); }catch(e){}
-  try{ syncFullscreenBtn(); }catch(e){}
   try{ if(cur) updateHUD(); }catch(e){}
 };
 

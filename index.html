@@ -164,9 +164,6 @@
         <div class="row"><span data-i18n="settings.fullscreen">ملء الشاشة</span>
           <button class="btn small" id="btn-fullscreen"><svg class="ic"><use href="#i-expand"/></svg><span data-i18n="settings.fullscreenBtn">تفعيل</span></button>
         </div>
-        <div class="row"><span data-i18n="settings.fullscreen">ملء الشاشة</span>
-          <button class="btn small" id="btn-fullscreen"><svg class="ic"><use href="#i-expand"/></svg><span data-i18n="settings.fullscreenBtn">تفعيل</span></button>
-        </div>
         <div class="row"><span data-i18n="settings.reset">تصفير التقدم</span>
           <button class="btn small danger" id="btn-reset"><svg class="ic"><use href="#i-trash"/></svg><span data-i18n="settings.resetBtn">مسح</span></button>
         </div>
@@ -245,9 +242,27 @@
         <span class="tut-label" data-i18n="tut.label">تعليمات</span>
         <button class="tut-skip" id="tut-skip" data-i18n="tut.skip">تخطّي</button>
       </div>
-      <h3 id="tut-title"></h3>
-      <p id="tut-body"></p>
-      <div class="tut-dots" id="tut-dots"></div>
+
+      <!-- the scrollable body: on a short screen the text is taller
+           than the card, so it must be able to scroll instead of
+           spilling out of the rounded box -->
+      <div class="tut-scroll" id="tut-scroll">
+        <h3 id="tut-title"></h3>
+        <p id="tut-body"></p>
+      </div>
+
+      <div class="tut-foot">
+        <div class="tut-dots" id="tut-dots"></div>
+        <div class="tut-nav">
+          <button class="tut-btn" id="tut-prev" aria-label="السابق">
+            <svg class="ic"><use href="#i-arrow-r"/></svg>
+          </button>
+          <button class="tut-btn" id="tut-next" aria-label="التالي">
+            <svg class="ic"><use href="#i-arrow-l"/></svg>
+          </button>
+        </div>
+      </div>
+
       <div class="tut-hint" id="tut-hint"></div>
     </div>
   </div>
