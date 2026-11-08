@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-label="قنديل">
+  <title>قنديل</title>
+  <defs>
+    <radialGradient id="mbg" cx="50%" cy="46%" r="78%">
+      <stop offset="0" stop-color="#241536"/>
+      <stop offset="0.55" stop-color="#100a1c"/>
+      <stop offset="1" stop-color="#05030a"/>
+    </radialGradient>
+    <radialGradient id="mhalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffe8b9" stop-opacity="0.50"/>
+      <stop offset="0.42" stop-color="#ffc478" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffbe6e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mcloak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9c0"/>
+      <stop offset="0.42" stop-color="#f0a94e"/>
+      <stop offset="0.75" stop-color="#b8641f"/>
+      <stop offset="1" stop-color="#7a3d10"/>
+    </linearGradient>
+    <linearGradient id="minner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="mflame" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#ffe9b0"/>
+      <stop offset="1" stop-color="#ffbe5a" stop-opacity="0.55"/>
+    </radialGradient>
+    <radialGradient id="mlampglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff5d7" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ffbe6e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- full-bleed background: a maskable icon must have NO transparent
+       corners, so this rect covers the whole 512x512 canvas -->
+  <rect width="512" height="512" fill="url(#mbg)"/>
+
+  <g fill="#ffd79a" opacity="0.26">
+    <circle cx="112" cy="132" r="3.0"/>
+    <circle cx="404" cy="112" r="2.4"/>
+    <circle cx="436" cy="230" r="3.2"/>
+    <circle cx="86" cy="300" r="2.4"/>
+  </g>
+
+  <!-- everything below is scaled to 0.74 and re-centred, so the whole
+       character stays inside the 80% safe circle that Android and iOS
+       guarantee to keep visible.
+
+       The body proportions match icon.svg: a compact ~1:1.3 figure
+       with the lantern tucked against the cloak, not floating clear
+       of it. A maskable icon has even less room than a normal one,
+       so a wide silhouette would be the first thing the circular
+       crop eats. -->
+  <g transform="translate(256 256) scale(0.74) translate(-256 -256)">
+    <circle cx="256" cy="290" r="200" fill="url(#mhalo)"/>
+
+    <g transform="translate(256 0)">
+      <path d="M-104 408 C-104 408 -96 320 -74 250 C-58 200 -40 168 -22 150
+               C-10 138 10 138 22 150 C40 168 58 200 74 250 C96 320 104 408 104 408
+               C104 428 66 440 0 440 C-66 440 -104 428 -104 408 Z"
+            fill="#180a04" opacity="0.92" transform="translate(0 -5) scale(1.05 1.02)"/>
+
+      <path d="M-104 408 C-104 408 -96 320 -74 250 C-58 200 -40 168 -22 150
+               C-10 138 10 138 22 150 C40 168 58 200 74 250 C96 320 104 408 104 408
+               C104 428 66 440 0 440 C-66 440 -104 428 -104 408 Z"
+            fill="url(#mcloak)"/>
+
+      <ellipse cx="0" cy="286" rx="30" ry="112" fill="url(#minner)"/>
+
+      <ellipse cx="-24" cy="228" rx="10.5" ry="12.5" fill="#1c0c04" opacity="0.95"/>
+      <ellipse cx="24"  cy="228" rx="10.5" ry="12.5" fill="#1c0c04" opacity="0.95"/>
+      <circle cx="-26.5" cy="224" r="3.6" fill="#ffffff" opacity="0.88"/>
+      <circle cx="21.5"  cy="224" r="3.6" fill="#ffffff" opacity="0.88"/>
+
+      <g transform="translate(62 330)">
+        <circle cx="0" cy="0" r="58" fill="url(#mlampglow)" opacity="0.8"/>
+        <path d="M0 -30 v-12" stroke="#2a1206" stroke-width="5" stroke-linecap="round" fill="none"/>
+        <rect x="-17" y="-30" width="34" height="9" rx="4" fill="#2a1206" opacity="0.9"/>
+        <path d="M-22 -30 L0 -46 L22 -30 Z" fill="#3d1a08"/>
+        <rect x="-16" y="-21" width="32" height="38" rx="6" fill="#3d1a08" opacity="0.55"/>
+        <circle cx="0" cy="-2" r="13.5" fill="url(#mflame)"/>
+        <path d="M-16 -21 v38 M16 -21 v38" stroke="#3d1a08" stroke-width="4" stroke-linecap="round" opacity="0.85"/>
+        <rect x="-18" y="16" width="36" height="9" rx="4" fill="#2a1206" opacity="0.9"/>
+        <rect x="-9" y="25" width="18" height="6" rx="3" fill="#2a1206" opacity="0.75"/>
+      </g>
+    </g>
+
+    <rect x="0" y="456" width="512" height="56" fill="#2c180c"/>
+    <rect x="0" y="456" width="512" height="7" fill="#8a5428"/>
+  </g>
+</svg>

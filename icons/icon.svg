@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     preserveAspectRatio="xMidYMid meet" role="img" aria-label="قنديل">
+  <title>قنديل</title>
+  <defs>
+    <!-- background: the same deep violet-to-black the menu uses -->
+    <radialGradient id="bg" cx="50%" cy="42%" r="72%">
+      <stop offset="0" stop-color="#241536"/>
+      <stop offset="0.55" stop-color="#100a1c"/>
+      <stop offset="1" stop-color="#05030a"/>
+    </radialGradient>
+
+    <!-- warm light pool behind the spirit -->
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffe8b9" stop-opacity="0.55"/>
+      <stop offset="0.42" stop-color="#ffc478" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#ffbe6e" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- the cloak body, exactly as the game shades it -->
+    <linearGradient id="cloak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9c0"/>
+      <stop offset="0.42" stop-color="#f0a94e"/>
+      <stop offset="0.75" stop-color="#b8641f"/>
+      <stop offset="1" stop-color="#7a3d10"/>
+    </linearGradient>
+
+    <!-- inner highlight down the middle of the cloak -->
+    <linearGradient id="inner" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- the lantern flame core -->
+    <radialGradient id="flame" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#ffe9b0"/>
+      <stop offset="1" stop-color="#ffbe5a" stop-opacity="0.55"/>
+    </radialGradient>
+
+    <!-- lantern glow -->
+    <radialGradient id="lampglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff5d7" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#ffbe6e" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- the gold rim light on the cloak edge -->
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd79a" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffb15c" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ============ background ============ -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+
+  <!-- a few faint dust motes, the menu ambience in miniature -->
+  <g fill="#ffd79a" opacity="0.30">
+    <circle cx="96" cy="118" r="3.2"/>
+    <circle cx="418" cy="96" r="2.4"/>
+    <circle cx="452" cy="214" r="3.6"/>
+    <circle cx="64" cy="286" r="2.6"/>
+    <circle cx="140" cy="72" r="2.0"/>
+    <circle cx="392" cy="330" r="2.8"/>
+  </g>
+
+  <!-- ============ light pool ============ -->
+  <circle cx="256" cy="290" r="200" fill="url(#halo)"/>
+
+  <!-- =========================================================
+       THE SPIRIT — proportioned for a SQUARE icon, not for the
+       game's 26x34 hitbox.
+
+       The previous version reused the in-game silhouette at 14x
+       scale, which produced a 184-wide, 488-tall figure: a 1:2.6
+       sliver that read as "stretched" the moment it was placed in
+       a square icon. A home-screen icon needs a compact, roughly
+       1:1.3 body with the lantern tucked against it, so that is
+       what this draws.
+       ========================================================= -->
+  <g transform="translate(256 0)">
+
+    <!-- dark rim: separates the spirit from the background -->
+    <path d="M-104 408
+             C-104 408 -96 320 -74 250
+             C-58 200 -40 168 -22 150
+             C-10 138 10 138 22 150
+             C40 168 58 200 74 250
+             C96 320 104 408 104 408
+             C104 428 66 440 0 440
+             C-66 440 -104 428 -104 408 Z"
+          fill="#180a04" opacity="0.92"
+          transform="translate(0 -5) scale(1.05 1.02)"/>
+
+    <!-- cloak body -->
+    <path d="M-104 408
+             C-104 408 -96 320 -74 250
+             C-58 200 -40 168 -22 150
+             C-10 138 10 138 22 150
+             C40 168 58 200 74 250
+             C96 320 104 408 104 408
+             C104 428 66 440 0 440
+             C-66 440 -104 428 -104 408 Z"
+          fill="url(#cloak)"/>
+
+    <!-- rim light down the left edge -->
+    <path d="M-104 408
+             C-104 408 -96 320 -74 250
+             C-58 200 -40 168 -22 150
+             C-14 142 -6 140 0 144
+             C-20 178 -40 226 -52 284
+             C-62 336 -66 380 -64 408
+             C-64 420 -80 424 -92 420
+             C-100 416 -104 414 -104 408 Z"
+          fill="url(#rim)" opacity="0.5"/>
+
+    <!-- soft inner highlight — gives the form roundness -->
+    <ellipse cx="0" cy="286" rx="30" ry="112" fill="url(#inner)"/>
+
+    <!-- ============ face ============ -->
+    <!-- eyes: two dark ovals with a single highlight dot each -->
+    <ellipse cx="-24" cy="228" rx="10.5" ry="12.5" fill="#1c0c04" opacity="0.95"/>
+    <ellipse cx="24"  cy="228" rx="10.5" ry="12.5" fill="#1c0c04" opacity="0.95"/>
+    <circle cx="-26.5" cy="224" r="3.6" fill="#ffffff" opacity="0.88"/>
+    <circle cx="21.5"  cy="224" r="3.6" fill="#ffffff" opacity="0.88"/>
+
+    <!-- ============ the lantern, held against the right side ============
+         It used to float at x=74, well clear of the body, which made
+         the whole figure read even wider than it was. It now sits at
+         x=62, overlapping the cloak edge, so the silhouette stays
+         compact and square-ish. -->
+    <g transform="translate(62 330)">
+      <!-- glow behind the lantern body -->
+      <circle cx="0" cy="0" r="58" fill="url(#lampglow)" opacity="0.8"/>
+
+      <!-- the carrying ring / hook -->
+      <path d="M0 -30 v-12" stroke="#2a1206" stroke-width="5" stroke-linecap="round" fill="none"/>
+
+      <!-- top cap -->
+      <rect x="-17" y="-30" width="34" height="9" rx="4" fill="#2a1206" opacity="0.9"/>
+      <!-- the peaked roof of the lantern -->
+      <path d="M-22 -30 L0 -46 L22 -30 Z" fill="#3d1a08"/>
+
+      <!-- the glass cage -->
+      <rect x="-16" y="-21" width="32" height="38" rx="6" fill="#3d1a08" opacity="0.55"/>
+      <!-- the flame inside -->
+      <circle cx="0" cy="-2" r="13.5" fill="url(#flame)"/>
+      <!-- vertical bars of the cage, drawn over the flame -->
+      <path d="M-16 -21 v38 M16 -21 v38" stroke="#3d1a08" stroke-width="4" stroke-linecap="round" opacity="0.85"/>
+      <!-- bottom cap -->
+      <rect x="-18" y="16" width="36" height="9" rx="4" fill="#2a1206" opacity="0.9"/>
+      <!-- a small foot -->
+      <rect x="-9" y="25" width="18" height="6" rx="3" fill="#2a1206" opacity="0.75"/>
+    </g>
+  </g>
+
+  <!-- ============ ground line — the platform the spirit stands on ============ -->
+  <rect x="0" y="456" width="512" height="56" fill="#2c180c"/>
+  <rect x="0" y="456" width="512" height="7" fill="#8a5428"/>
+  <g fill="#ffb15c" opacity="0.55">
+    <rect x="24"  y="459" width="26" height="4" rx="2"/>
+    <rect x="86"  y="459" width="18" height="4" rx="2"/>
+    <rect x="146" y="459" width="30" height="4" rx="2"/>
+    <rect x="212" y="459" width="20" height="4" rx="2"/>
+    <rect x="272" y="459" width="28" height="4" rx="2"/>
+    <rect x="336" y="459" width="18" height="4" rx="2"/>
+    <rect x="392" y="459" width="26" height="4" rx="2"/>
+    <rect x="452" y="459" width="20" height="4" rx="2"/>
+  </g>
+</svg>
