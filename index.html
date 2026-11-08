@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#08060f">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="قنديل">
+<meta name="application-name" content="قنديل">
+<meta name="description" content="روح قنديل صغيرة تعيد النور إلى بيوت مظلمة — لعبة منصّات وألغاز بخمسة عوالم وخمس وعشرين مرحلة.">
+<title>قنديل · Qandil</title>
+
+<!-- ── PWA ──────────────────────────────────────────────────────
+     `display:fullscreen` in the manifest is what actually removes
+     the browser chrome once the game is installed to the home
+     screen. Everything below is the plumbing that makes it
+     installable: the manifest itself, the icon set, and the
+     Apple-specific tags (iOS ignores the manifest's icons and
+     needs its own link rel). -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<svg id="icons" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.53.85l10-6.5a1 1 0 0 0 0-1.7l-10-6.5A1 1 0 0 0 8 5.5z" fill="currentColor"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3.2" y="3.2" width="7" height="7" rx="2"/><rect x="13.8" y="3.2" width="7" height="7" rx="2"/><rect x="3.2" y="13.8" width="7" height="7" rx="2"/><rect x="13.8" y="13.8" width="7" height="7" rx="2"/></g></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6h.08A1.7 1.7 0 0 0 10.1 3V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.08a1.7 1.7 0 0 0 1.55 1.02H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></g></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="1.15" fill="currentColor" stroke="none"/></g></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><g fill="currentColor"><rect x="7" y="5" width="3.6" height="14" rx="1.6"/><rect x="13.4" y="5" width="3.6" height="14" rx="1.6"/></g></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3L12 5.5v13L7 14.5H4z" fill="currentColor" stroke="none"/><path d="M16 9a4.2 4.2 0 0 1 0 6"/><path d="M18.8 6.2a8 8 0 0 1 0 11.6"/></g></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3L12 5.5v13L7 14.5H4z" fill="currentColor" stroke="none"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5"/></g></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6.5l10-2v11"/><circle cx="6.6" cy="18" r="2.6"/><circle cx="16.6" cy="15.5" r="2.6"/></g></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 4 5.7 4 9s-1.4 6.4-4 9c-2.6-2.6-4-5.7-4-9s1.4-6.4 4-9z"/></g></symbol>
+    <symbol id="i-gem" viewBox="0 0 24 24"><path d="M12 2.6l7.4 6.1L12 21.4 4.6 8.7z" fill="currentColor"/><path d="M12 2.6L12 21.4M4.6 8.7h14.8" stroke="rgba(0,0,0,.35)" stroke-width="1"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></g></symbol>
+    <symbol id="i-oil" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6M10 3.5v3.2c0 .5-.2 1-.6 1.4L7 10.4A3 3 0 0 0 6 12.6V18a2.5 2.5 0 0 0 2.5 2.5h7A2.5 2.5 0 0 0 18 18v-5.4a3 3 0 0 0-1-2.2l-2.4-2.3a2 2 0 0 1-.6-1.4V3.5"/><path d="M6.4 14.2h11.2"/></g></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="4.6" y="10.4" width="14.8" height="10" rx="3"/><path d="M8.4 10.4V7.8a3.6 3.6 0 0 1 7.2 0v2.6"/></g></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.5-5.8-3.05L6.2 20.5l1.1-6.5L2.6 9.4l6.5-.95z" fill="currentColor"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21s-7.6-4.7-9.4-9.1C1.3 8.2 3.2 4.6 6.7 4.1c2-.3 3.9.7 5.3 2.4 1.4-1.7 3.3-2.7 5.3-2.4 3.5.5 5.4 4.1 4.1 7.8C19.6 16.3 12 21 12 21z" fill="currentColor"/></symbol>
+    <symbol id="i-arrow-l" viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow-r" viewBox="0 0 24 24"><path d="M9.5 5.5L16 12l-6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M5.5 14.5L12 8l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><g fill="currentColor"><path d="M6 5.5v13a1 1 0 0 0 1.53.85L16 12.7a1 1 0 0 0 0-1.4L7.53 4.65A1 1 0 0 0 6 5.5z"/><rect x="17.6" y="5" width="2.6" height="14" rx="1.3"/></g></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4.2V9h-4.8"/></g></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.6L12 4l8 6.6V19a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 19z"/><path d="M9.6 20.6v-6h4.8v6"/></g></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.8l4.4 4.4L19 6.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l1 12.2A1.8 1.8 0 0 0 9.3 21h5.4a1.8 1.8 0 0 0 1.8-1.8L17.5 7"/></g></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5H3.5V9M15 3.5h5.5V9M9 20.5H3.5V15M15 20.5h5.5V15"/></g></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9H9V3.5M20.5 9H15V3.5M3.5 15H9v5.5M20.5 15H15v5.5"/></g></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5H3.5V9M15 3.5h5.5V9M9 20.5H3.5V15M15 20.5h5.5V15"/></g></symbol>
+    <symbol id="i-collapse" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9H9V3.5M20.5 9H15V3.5M3.5 15H9v5.5M20.5 15H15v5.5"/></g></symbol>
+    <symbol id="i-lamp" viewBox="0 0 64 64">
+      <path d="M32 4v8" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>
+      <path d="M22 22h20l-4-9H26z" fill="currentColor" opacity=".9"/>
+      <path d="M18 22h28c2 10 4 15 4 22 0 9-8 14-18 14s-18-5-18-14c0-7 2-12 4-22z" fill="url(#lampGrad)"/>
+      <circle cx="32" cy="40" r="7.5" fill="#fff8e0"/>
+      <path d="M32 22v-4" stroke="currentColor" stroke-width="2" opacity=".5"/>
+    </symbol>
+    <linearGradient id="lampGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe3b4"/><stop offset=".55" stop-color="#ffc978"/><stop offset="1" stop-color="#b96a22"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <section class="screen active" id="scr-menu">
+    <div class="menu-wrap">
+
+      <!-- ── hero : lamp + wordmark ───────────────────────────── -->
+      <div class="menu-hero">
+        <div class="lamp">
+          <div class="lamp-glow"></div>
+          <div class="lamp-rays"></div>
+          <svg class="lamp-svg"><use href="#i-lamp"/></svg>
+        </div>
+        <h1 class="title" data-i18n="app.title">قنديل</h1>
+        <p class="sub" data-i18n="app.subtitle">رحلة النور</p>
+      </div>
+
+      <!-- ── action column ───────────────────────────────────── -->
+      <div class="menu-actions">
+        <div class="hero-stats" role="group" aria-label="Progress">
+          <span class="hstat"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><b id="menu-stars">0</b><small data-i18n="menu.stars">نجمة</small></span>
+          <span class="hstat"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><b id="menu-levels">0/25</b><small data-i18n="menu.levelsDone">مرحلة</small></span>
+        </div>
+
+        <button class="btn primary" id="btn-play">
+          <svg class="ic"><use href="#i-play"/></svg>
+          <span data-i18n="menu.play">ابدأ الرحلة</span>
+        </button>
+
+        <div class="menu-row">
+          <button class="btn" id="btn-levels">
+            <svg class="ic"><use href="#i-grid"/></svg>
+            <span data-i18n="menu.levels">المراحل</span>
+          </button>
+          <button class="btn" id="btn-settings">
+            <svg class="ic"><use href="#i-gear"/></svg>
+            <span data-i18n="menu.settings">الإعدادات</span>
+          </button>
+        </div>
+
+        <button class="btn quiet" id="btn-credits">
+          <svg class="ic"><use href="#i-info"/></svg>
+          <span data-i18n="menu.credits">عن اللعبة</span>
+        </button>
+
+        <div class="menu-foot">
+          <button class="chip" id="btn-lang"><svg class="ic"><use href="#i-globe"/></svg><span id="lang-label">EN</span></button>
+          <button class="chip" id="btn-sound"><svg class="ic"><use href="#i-sound"/></svg></button>
+          <button class="chip" id="btn-music"><svg class="ic"><use href="#i-music"/></svg></button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="screen" id="scr-levels">
+    <div class="sheet wide">
+      <header class="bar">
+        <button class="icon" data-back="scr-menu"><svg class="ic"><use href="#i-back"/></svg></button>
+        <h2 data-i18n="levels.title">المراحل</h2>
+        <span class="stars-total"><svg class="ic"><use href="#i-star"/></svg><b id="total-stars">0</b></span>
+      </header>
+      <div class="grid" id="level-grid"></div>
+    </div>
+  </section>
+
+  <section class="screen" id="scr-settings">
+    <div class="sheet">
+      <header class="bar">
+        <button class="icon" data-back="scr-menu"><svg class="ic"><use href="#i-back"/></svg></button>
+        <h2 data-i18n="settings.title">الإعدادات</h2>
+      </header>
+      <div class="rows">
+        <div class="row"><span data-i18n="settings.lang">اللغة</span>
+          <div class="seg" id="seg-lang"><button data-lang="ar">العربية</button><button data-lang="en">English</button></div>
+        </div>
+        <div class="row"><span data-i18n="settings.sound">المؤثرات الصوتية</span>
+          <div class="seg" id="seg-sound"><button data-sound="1" data-i18n="settings.on">تشغيل</button><button data-sound="0" data-i18n="settings.off">إيقاف</button></div>
+        </div>
+        <div class="row"><span data-i18n="settings.music">الموسيقى</span>
+          <div class="seg" id="seg-music"><button data-music="1" data-i18n="settings.on">تشغيل</button><button data-music="0" data-i18n="settings.off">إيقاف</button></div>
+        </div>
+        <div class="row"><span data-i18n="settings.quality">جودة التأثيرات</span>
+          <div class="seg" id="seg-quality"><button data-q="high" data-i18n="settings.high">عالية</button><button data-q="low" data-i18n="settings.low">خفيفة</button></div>
+        </div>
+        <div class="row"><span data-i18n="settings.fullscreen">ملء الشاشة</span>
+          <button class="btn small" id="btn-fullscreen"><svg class="ic"><use href="#i-expand"/></svg><span data-i18n="settings.fullscreenBtn">تفعيل</span></button>
+        </div>
+        <div class="row"><span data-i18n="settings.fullscreen">ملء الشاشة</span>
+          <button class="btn small" id="btn-fullscreen"><svg class="ic"><use href="#i-expand"/></svg><span data-i18n="settings.fullscreenBtn">تفعيل</span></button>
+        </div>
+        <div class="row"><span data-i18n="settings.reset">تصفير التقدم</span>
+          <button class="btn small danger" id="btn-reset"><svg class="ic"><use href="#i-trash"/></svg><span data-i18n="settings.resetBtn">مسح</span></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen" id="scr-credits">
+    <div class="sheet">
+      <header class="bar">
+        <button class="icon" data-back="scr-menu"><svg class="ic"><use href="#i-back"/></svg></button>
+        <h2 data-i18n="credits.title">عن اللعبة</h2>
+      </header>
+      <p class="about" data-i18n="credits.body"></p>
+    </div>
+  </section>
+
+  <div id="hud" hidden>
+    <div class="hud-left">
+      <button class="icon" id="btn-pause"><svg class="ic"><use href="#i-pause"/></svg></button>
+      <div class="hud-level"><b id="hud-name">—</b><small id="hud-world">—</small></div>
+    </div>
+    <div class="hud-right">
+      <div class="hearts" id="hud-hearts" aria-live="polite"></div>
+      <div class="hud-stat"><svg class="ic gold"><use href="#i-gem"/></svg><b id="hud-gems">0/0</b></div>
+      <div class="hud-stat"><svg class="ic"><use href="#i-clock"/></svg><b id="hud-time">0:00</b></div>
+      <div class="oil"><svg class="ic gold"><use href="#i-oil"/></svg><div class="oil-bar"><i id="hud-oil"></i></div></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="ov-pause" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+      <h2 id="pause-title" data-i18n="pause.title">توقف مؤقت</h2>
+      <div class="actions">
+        <button class="btn primary" id="btn-resume"><svg class="ic"><use href="#i-play"/></svg><span data-i18n="pause.resume">متابعة</span></button>
+        <button class="btn ghost" id="btn-restart"><svg class="ic"><use href="#i-retry"/></svg><span data-i18n="pause.restart">إعادة</span></button>
+        <button class="btn ghost" id="btn-quit"><svg class="ic"><use href="#i-home"/></svg><span data-i18n="pause.menu">القائمة</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="ov-gameover" hidden>
+    <div class="sheet go" role="alertdialog" aria-modal="true" aria-labelledby="go-title" aria-describedby="go-line">
+      <div class="go-icon"><svg class="ic" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet"><use href="#i-heart"/></svg></div>
+      <h2 id="go-title"></h2>
+      <p class="go-line" id="go-line"></p>
+      <p class="go-sub" id="go-sub"></p>
+      <div class="actions">
+        <button class="btn primary" id="btn-go-retry"><svg class="ic"><use href="#i-retry"/></svg><span data-i18n="gameover.retry">إعادة المرحلة</span></button>
+        <button class="btn ghost" id="btn-go-menu"><svg class="ic"><use href="#i-home"/></svg><span data-i18n="gameover.menu">القائمة الرئيسية</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay" id="ov-result" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="res-title">
+      <h2 id="res-title">أحسنت</h2>
+      <div class="stars-big" id="res-stars">
+        <svg class="ic"><use href="#i-star"/></svg><svg class="ic"><use href="#i-star"/></svg><svg class="ic"><use href="#i-star"/></svg>
+      </div>
+      <div class="res-rows">
+        <div><svg class="ic gold"><use href="#i-gem"/></svg><span data-i18n="result.gems">الجواهر</span><b id="res-gems">0/0</b></div>
+        <div><svg class="ic"><use href="#i-clock"/></svg><span data-i18n="result.time">الوقت</span><b id="res-time">0:00</b></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btn-next"><svg class="ic"><use href="#i-next"/></svg><span data-i18n="result.next">المرحلة التالية</span></button>
+        <button class="btn ghost" id="btn-retry"><svg class="ic"><use href="#i-retry"/></svg><span data-i18n="result.retry">إعادة</span></button>
+        <button class="btn ghost" id="btn-home"><svg class="ic"><use href="#i-home"/></svg><span data-i18n="result.menu">القائمة</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tut" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <div class="tut-card">
+      <div class="tut-top">
+        <span class="tut-label" data-i18n="tut.label">تعليمات</span>
+        <button class="tut-skip" id="tut-skip" data-i18n="tut.skip">تخطّي</button>
+      </div>
+      <h3 id="tut-title"></h3>
+      <p id="tut-body"></p>
+      <div class="tut-dots" id="tut-dots"></div>
+      <div class="tut-hint" id="tut-hint"></div>
+    </div>
+  </div>
+
+  <div id="touch" hidden>
+    <div class="tpad pad-move">
+      <button class="tbtn" id="t-left" aria-label="يسار"><svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg></button>
+      <button class="tbtn" id="t-right" aria-label="يمين"><svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
+    </div>
+    <div class="tpad pad-jump">
+      <button class="tbtn jump" id="t-jump"><svg class="ic"><use href="#i-arrow-up"/></svg></button>
+    </div>
+  </div>
+</div>
+<script src="i18n.js"></script>
+<script src="levels.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

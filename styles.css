@@ -1,0 +1,809 @@
+:root{
+  --bg:#0a0812; --panel:rgba(22,16,30,.80); --line:rgba(255,201,120,.20);
+  --gold:#ffc978; --gold2:#e8933f; --txt:#f6ead8; --muted:#a08f7c;
+  --ok:#6ee7a8; --bad:#ff7a6b;
+  --r:18px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+/* =========================================================
+   VIEWPORT HEIGHT
+   ---------------------------------------------------------
+   `100%` on html/body resolves against the LAYOUT viewport,
+   which on a phone is the tallest the URL bar will ever let it
+   be. When the bar slides back in, the bottom of the page is
+   pushed out of view and the touch pads end up half off-screen.
+   `100dvh` tracks the DYNAMIC viewport — it shrinks and grows
+   with the bar, so the game always fits the pixels that are
+   actually visible. The `100%` line stays first as a fallback
+   for engines without dvh support.
+   ========================================================= */
+html,body{height:100%;height:100dvh;overflow:hidden;background:var(--bg)}
+body{
+  font-family:'Cairo',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color:var(--txt);user-select:none;
+  /* no rubber-banding, no pull-to-refresh stealing a jump */
+  overscroll-behavior:none;
+}
+html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif}
+
+/* `inset:0` already fills the viewport, but on a notched phone the
+   stage must also stay clear of the notch and the home indicator.
+   The padding is added to the stage, not the canvas, so the canvas
+   keeps its 100% and simply gets a smaller box to fill. */
+#stage{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;
+  background:radial-gradient(circle at 50% 45%,#150d1e 0%,#08060f 62%,#04030a 100%);
+  padding:env(safe-area-inset-top) env(safe-area-inset-right)
+          env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+#game{
+  display:block;width:100%;height:100%;
+  background:#07050d;
+}
+
+/* =========================================================
+   ICONS
+   `aspect-ratio` is set here so an SVG symbol can never be
+   stretched into an oval by a flex/grid parent, no matter
+   where it is used. `flex:0 0 auto` stops the parent from
+   resizing it.
+   ========================================================= */
+.ic{
+  width:1em;height:1em;
+  aspect-ratio:1 / 1;
+  display:block;flex:0 0 auto;
+  fill:none;
+  overflow:visible;
+}
+.ic.gold{color:var(--gold)}
+
+/* ============ MENU (full-bleed, no scroll) ============ */
+#scr-menu{padding:0;place-items:stretch}
+/* =========================================================
+   MENU LAYOUT
+   ---------------------------------------------------------
+   `minmax(0,1fr)` lets a column collapse to zero width when the
+   container's own size is momentarily wrong — which is exactly
+   what happens during a fullscreen transition, before `resize`
+   has re-measured the viewport. The buttons then pile into one
+   corner until something forces a reflow.
+
+   `minmax(min(240px,100%),1fr)` gives each column a floor, so
+   the layout can never collapse. `place-content:center` keeps
+   the whole grid centred even if both columns hit their floor.
+   ========================================================= */
+.menu-wrap{
+  position:relative;width:100%;height:100%;
+  display:grid;
+  grid-template-columns:minmax(min(240px,100%),1fr) minmax(min(240px,100%),1fr);
+  align-items:center;
+  place-content:center;
+  gap:clamp(18px,3.4vw,64px);
+  padding-block:clamp(16px,3.4vh,44px);
+  padding-inline:clamp(20px,4.5vw,80px);
+}
+/* logical ordering — the hero always leads, actions always trail,
+   in both RTL and LTR, without any left/right hard-coding */
+.menu-hero{order:1}
+.menu-actions{order:2}
+
+.menu-hero{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;text-align:center;min-width:0;
+  animation:menuIn .55s cubic-bezier(.2,.9,.3,1) both;
+}
+.menu-actions{
+  animation:menuIn .55s cubic-bezier(.2,.9,.3,1) .10s both;
+}
+@keyframes menuIn{
+  from{opacity:0;transform:translateY(16px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+.lamp{position:relative;width:clamp(64px,11vh,116px);height:clamp(64px,11vh,116px);color:var(--gold)}
+.lamp-glow{
+  position:absolute;inset:-55%;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,190,110,.5),rgba(255,150,70,.12) 45%,transparent 68%);
+  filter:blur(8px);animation:breathe 4.2s ease-in-out infinite;
+}
+.lamp-rays{
+  position:absolute;inset:-90%;border-radius:50%;pointer-events:none;
+  background:conic-gradient(from 0deg,
+    transparent 0deg, rgba(255,200,130,.13) 12deg, transparent 26deg,
+    transparent 60deg, rgba(255,200,130,.10) 74deg, transparent 90deg,
+    transparent 140deg, rgba(255,200,130,.12) 156deg, transparent 174deg,
+    transparent 220deg, rgba(255,200,130,.09) 236deg, transparent 254deg,
+    transparent 300deg, rgba(255,200,130,.11) 316deg, transparent 336deg);
+  -webkit-mask-image:radial-gradient(circle,#000 18%,transparent 72%);
+  mask-image:radial-gradient(circle,#000 18%,transparent 72%);
+  animation:spin 26s linear infinite;opacity:.85;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.lamp-svg{position:relative;width:100%;height:100%;filter:drop-shadow(0 0 22px rgba(255,180,90,.65))}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:.72}50%{transform:scale(1.14);opacity:1}}
+
+.title{
+  font-size:clamp(40px,9.4vh,92px);font-weight:900;letter-spacing:.01em;line-height:1;
+  margin-top:clamp(4px,1vh,14px);
+  background:linear-gradient(178deg,#fffaf0 4%,#ffe0ac 30%,var(--gold) 58%,#d07d2c 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 6px 34px rgba(255,170,70,.42));
+}
+html[lang="en"] .title{font-family:'Outfit',sans-serif;letter-spacing:.1em;font-weight:800}
+.sub{color:var(--muted);font-size:clamp(11px,1.7vh,15px);margin-top:clamp(4px,1vh,10px);letter-spacing:.28em}
+html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-transform:uppercase}
+
+/* =========================================================
+   PROGRESS CARD — the stars / levels readout.
+   It used to sit flush against the buttons with only 4-8px of
+   air, so it looked like the first row of the menu instead of
+   a separate readout. Now it is a real card: its own surface,
+   a gold hairline on top, two equal halves, and clear space
+   below it before the primary action starts.
+   ========================================================= */
+.hero-stats{
+  position:relative;
+  display:grid;grid-template-columns:1fr 1fr;
+  gap:0;
+  margin:0 0 clamp(10px,1.8vh,16px);
+  padding:clamp(10px,1.7vh,15px) 0;
+  border-radius:18px;
+  border:1px solid rgba(255,201,120,.16);
+  background:linear-gradient(168deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.07),
+    0 10px 30px rgba(0,0,0,.28);
+  overflow:hidden;
+}
+/* the same gold hairline the modals use — ties the UI together */
+.hero-stats::before{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:52%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,201,120,.45),transparent);
+}
+/* each half is a centred stack: value on top, label beneath */
+.hstat{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;min-width:0;padding-inline:6px;
+}
+.hstat .ic{width:15px;height:15px;color:var(--gold);opacity:.9}
+.hstat b{
+  font-size:clamp(17px,2.5vh,22px);font-weight:900;color:#ffe9c8;
+  font-variant-numeric:tabular-nums;line-height:1;
+}
+.hstat small{
+  color:var(--muted);font-size:clamp(9.5px,1.35vh,11px);
+  font-weight:700;letter-spacing:.10em;white-space:nowrap;
+}
+/* the divider is a full-height column rule, not a floating tick */
+.sep{
+  display:none;
+}
+.hero-stats .hstat + .hstat{
+  border-inline-start:1px solid rgba(255,201,120,.14);
+}
+
+/* actions column */
+.menu-actions{
+  display:flex;flex-direction:column;gap:clamp(8px,1.5vh,14px);
+  width:100%;max-width:min(430px,100%);justify-self:center;min-width:0;
+}
+.menu-row{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,1.5vh,14px)}
+
+/* =========================================================
+   PRIMARY ACTION — "Begin Journey" is the one thing a new
+   player must find, so it gets a real size advantage over the
+   secondary buttons: taller, wider type, a stronger shadow and
+   a wider sheen. Everything else stays deliberately quiet.
+   ========================================================= */
+#btn-play{
+  padding-block:clamp(14px,2.4vh,21px);
+  font-size:clamp(16px,2.35vh,21px);
+  letter-spacing:.01em;
+  border-radius:16px;
+  margin-block:clamp(2px,.5vh,5px);
+}
+#btn-play .ic{width:1.25em;height:1.25em}
+#btn-play:hover{
+  transform:translateY(-3px) scale(1.012);
+  box-shadow:0 20px 52px rgba(232,147,63,.60),inset 0 1px 0 rgba(255,255,255,.65);
+}
+#btn-play:active{transform:translateY(0) scale(.985)}
+/* a wider, slower sheen reads as a highlight rather than a glint */
+#btn-play::after{width:70%}
+
+.btn{
+  position:relative;overflow:hidden;border:1px solid var(--line);
+  background:rgba(255,255,255,.045);color:var(--txt);
+  font:inherit;font-weight:700;font-size:clamp(14px,1.9vh,17px);
+  padding:clamp(11px,1.9vh,17px) clamp(16px,2vw,22px);
+  border-radius:15px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:11px;
+  transition:transform .16s cubic-bezier(.2,.9,.3,1.4),background .2s,border-color .2s,box-shadow .2s;
+}
+.btn .ic{width:1.15em;height:1.15em;color:var(--gold);opacity:.95}
+.btn:hover{transform:translateY(-2px);background:rgba(255,255,255,.09);border-color:rgba(255,201,120,.5);box-shadow:0 10px 28px rgba(0,0,0,.45)}
+.btn:active{transform:translateY(0) scale(.98)}
+.btn.primary{
+  background:linear-gradient(178deg,#ffdfa4 0%,#ffc978 42%,#e8933f 100%);color:#2a1808;
+  border-color:rgba(255,235,190,.7);
+  box-shadow:0 12px 34px rgba(232,147,63,.34),inset 0 1px 0 rgba(255,255,255,.55);
+  font-size:clamp(15px,2.1vh,19px);font-weight:900;
+}
+.btn.primary .ic{color:#3a2208}
+.btn.primary:hover{box-shadow:0 16px 44px rgba(232,147,63,.55),inset 0 1px 0 rgba(255,255,255,.6)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--muted);font-weight:600}
+.btn.ghost:hover{color:var(--txt);background:rgba(255,255,255,.05)}
+.btn.ghost .ic{color:currentColor}
+/* quiet = low-emphasis secondary action, still tappable */
+.btn.quiet{
+  background:transparent;border-color:rgba(255,255,255,.07);color:var(--muted);
+  font-weight:600;font-size:clamp(13px,1.7vh,15px);
+  padding:clamp(9px,1.5vh,13px) clamp(14px,2vw,20px);
+}
+.btn.quiet .ic{color:var(--muted);opacity:.9}
+.btn.quiet:hover{color:var(--txt);border-color:rgba(255,201,120,.35);background:rgba(255,255,255,.05)}
+.btn.quiet:hover .ic{color:var(--gold)}
+.btn.small{padding:8px 16px;font-size:14px;border-radius:11px;gap:7px}
+.btn.danger{color:var(--bad);border-color:rgba(255,122,107,.35)}
+.btn.danger .ic{color:var(--bad)}
+/* the fullscreen row: a quiet toggle that lights up while active */
+#btn-fullscreen.on{
+  color:var(--gold);
+  border-color:rgba(255,201,120,.55);
+  background:rgba(255,201,120,.12);
+}
+#btn-fullscreen.on .ic{color:var(--gold)}
+.btn.primary::after{
+  content:'';position:absolute;top:0;left:-120%;width:55%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);
+  transform:skewX(-20deg);animation:sheen 5s ease-in-out infinite;
+}
+@keyframes sheen{0%,74%{left:-120%}90%,100%{left:150%}}
+/* the sheen travels in the writing direction, so it sweeps
+   right-to-left in Arabic and left-to-right in English */
+html[dir="rtl"] .btn.primary::after{
+  animation-name:sheen-rtl;
+}
+@keyframes sheen-rtl{
+  0%,74%{left:auto;right:-120%}
+  90%,100%{left:auto;right:150%}
+}
+
+.menu-foot{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  margin-top:clamp(2px,.6vh,6px);
+  padding-top:clamp(8px,1.6vh,16px);
+  border-top:1px solid rgba(255,255,255,.06);
+}
+.chip{
+  border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
+  font:inherit;font-size:13px;font-weight:700;padding:8px 14px;border-radius:999px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;transition:background .2s,border-color .2s,transform .15s;
+}
+.chip .ic{width:15px;height:15px;color:var(--gold)}
+.chip:hover{background:rgba(255,201,120,.16);border-color:rgba(255,201,120,.5);transform:translateY(-1px)}
+.chip.off{opacity:.45}
+.chip.off .ic{color:var(--muted)}
+
+/* ---------- screens ---------- */
+.screen{
+  position:absolute;inset:0;display:grid;place-items:center;padding:24px;
+  opacity:0;pointer-events:none;transition:opacity .32s ease, transform .32s ease;
+  transform:scale(.985);
+}
+.screen.active{opacity:1;pointer-events:auto;transform:scale(1)}
+/* =========================================================
+   SCREENS (levels / settings / about)
+   ---------------------------------------------------------
+   Two bugs were visible on a phone:
+     1. `overflow:auto` + `border-radius` lets the scrollbar
+        paint OUTSIDE the rounded corner, so its ends poked out
+        past the sheet edge.
+     2. A styled scrollbar inside a rounded box always looks
+        like a foreign object.
+   Fix: the scrollbar is hidden entirely and the sheet keeps a
+   small inset so content never touches the rounded edge.
+   The sheet still scrolls — it just does it invisibly, which
+   is the normal pattern for touch UIs.
+   ========================================================= */
+.sheet{
+  width:min(560px,94vw);max-height:92vh;
+  overflow-y:auto;overflow-x:hidden;
+  background:linear-gradient(165deg,rgba(32,23,44,.90),rgba(12,9,20,.95));
+  border:1px solid var(--line);border-radius:var(--r);
+  padding:clamp(18px,3vh,28px) clamp(16px,2.6vw,26px);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  box-shadow:0 26px 80px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.06);
+  overscroll-behavior:contain;
+  scrollbar-width:none;              /* Firefox */
+  -ms-overflow-style:none;           /* old Edge / IE */
+}
+/* WebKit: hide the bar completely — no thumb, no track, no ends */
+.sheet::-webkit-scrollbar{width:0;height:0;display:none}
+.sheet.wide{width:min(820px,95vw)}
+.sheet.center{text-align:center}
+
+.actions{display:flex;flex-direction:column;gap:10px;margin-top:22px}
+
+/* bars & rows */
+.bar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.bar h2{font-size:clamp(17px,2.4vh,22px);font-weight:900;flex:1}
+.icon{
+  width:40px;height:40px;display:grid;place-items:center;border-radius:12px;
+  border:1px solid var(--line);background:rgba(255,255,255,.05);color:var(--txt);
+  font:inherit;font-size:17px;cursor:pointer;transition:background .2s,border-color .2s,transform .15s;
+}
+.icon .ic{width:18px;height:18px}
+.icon:hover{background:rgba(255,201,120,.16);border-color:rgba(255,201,120,.45)}
+.icon:active{transform:scale(.94)}
+.stars-total{display:flex;align-items:center;gap:6px;color:var(--gold);font-weight:800;font-size:14px}
+.stars-total .ic{width:15px;height:15px}
+
+.rows{display:flex;flex-direction:column;gap:6px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+.row:last-child{border-bottom:0}
+.row>span{font-size:15px;font-weight:600}
+.seg{display:flex;background:rgba(0,0,0,.35);border-radius:11px;padding:3px;border:1px solid rgba(255,255,255,.06)}
+.seg button{
+  border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:700;
+  padding:7px 14px;border-radius:8px;cursor:pointer;transition:.2s;
+}
+.seg button.on{background:linear-gradient(180deg,#ffd28c,var(--gold2));color:#231507}
+
+/* levels grid */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:9px}
+.world-head{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin:12px 0 2px;font-size:12px;font-weight:800;color:var(--gold);letter-spacing:.08em}
+.world-head::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+.lv{
+  position:relative;aspect-ratio:1;border-radius:15px;cursor:pointer;
+  border:1px solid var(--line);background:linear-gradient(168deg,rgba(255,255,255,.075),rgba(255,255,255,.015));
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+  font:inherit;color:var(--txt);transition:transform .16s,border-color .2s,box-shadow .2s;
+}
+.lv:hover{transform:translateY(-3px);border-color:rgba(255,201,120,.6);box-shadow:0 12px 28px rgba(0,0,0,.55)}
+.lv:active{transform:translateY(0) scale(.97)}
+.lv b{font-size:21px;font-weight:900;line-height:1}
+.lv .st{display:flex;gap:2px;color:rgba(255,201,120,.22)}
+.lv .st .ic{width:10px;height:10px}
+.lv .st .ic.on{color:var(--gold);filter:drop-shadow(0 0 6px rgba(255,201,120,.85))}
+.lv.locked{opacity:.4;cursor:not-allowed;filter:grayscale(.75)}
+.lv.locked:hover{transform:none;box-shadow:none;border-color:var(--line)}
+.lv .lk{position:absolute;top:6px;inset-inline-end:6px;width:13px;height:13px;color:var(--muted);opacity:.8}
+
+/* hud */
+#hud{
+  position:absolute;inset-block-start:0;inset-inline:0;
+  padding-block:14px;padding-inline:18px;
+  display:flex;justify-content:space-between;align-items:flex-start;gap:12px;
+  pointer-events:none;
+}
+#hud[hidden]{display:none}
+.hud-left,.hud-right{display:flex;align-items:center;gap:10px;pointer-events:auto}
+.hud-left,.hud-right{
+  background:rgba(12,9,18,.58);border:1px solid rgba(255,255,255,.07);
+  border-radius:14px;padding:7px 12px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+.hud-level{display:flex;flex-direction:column;line-height:1.2}
+.hud-level b{font-size:13px;font-weight:800}
+.hud-level small{font-size:10px;color:var(--muted);letter-spacing:.1em}
+.hud-stat{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:800}
+.hud-stat .ic{width:14px;height:14px;color:var(--muted)}
+.hud-stat .ic.gold{color:var(--gold)}
+.hearts{display:flex;align-items:center;gap:3px}
+.hearts .hrt{
+  width:14px;height:14px;color:rgba(255,255,255,.16);
+  transition:color .25s,transform .25s,filter .25s;
+}
+.hearts .hrt.on{
+  color:#ff6b7a;
+  filter:drop-shadow(0 0 5px rgba(255,107,122,.85));
+}
+.hearts.hit{animation:heartHit .45s ease}
+@keyframes heartHit{
+  0%{transform:scale(1)}
+  28%{transform:scale(1.22)}
+  55%{transform:scale(.94)}
+  100%{transform:scale(1)}
+}
+.oil{display:flex;align-items:center;gap:7px}
+.oil .ic{width:14px;height:14px}
+.oil-bar{width:74px;height:8px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
+.oil-bar i{display:block;height:100%;width:100%;border-radius:99px;background:linear-gradient(90deg,#ffb35c,#ffe3a8);transition:width .18s}
+
+/* =========================================================
+   OVERLAYS — no scrolling, everything visible at once.
+   ---------------------------------------------------------
+   The old sheets used `max-height:92vh` + `overflow:auto`, so
+   on a short phone the buttons fell below the fold and the
+   player had to scroll a modal to find "Retry". A modal that
+   scrolls is a broken modal.
+   Now: the sheet sizes to its content, is capped by `100dvh`
+   (which accounts for the mobile URL bar), and never scrolls.
+   The content itself is compact enough to always fit.
+   ========================================================= */
+.overlay{
+  position:absolute;inset:0;z-index:20;
+  display:grid;place-items:center;
+  padding:clamp(12px,2.5vh,28px);
+  background:rgba(5,3,10,.74);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  animation:ovIn .22s ease both;
+}
+.overlay[hidden]{display:none}
+@keyframes ovIn{from{opacity:0}to{opacity:1}}
+
+@keyframes pop{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
+
+/* the modal sheet: content-sized, capped, never scrollable */
+.overlay .sheet{
+  position:relative;
+  width:min(430px,92vw);
+  max-height:calc(100dvh - clamp(24px,5vh,56px));
+  overflow:hidden;                 /* ← no scrolling, ever */
+  scrollbar-width:none;
+  -ms-overflow-style:none;
+  display:flex;flex-direction:column;
+  padding:clamp(20px,3.2vh,30px) clamp(18px,3vw,26px);
+  border-radius:22px;
+  background:linear-gradient(168deg,rgba(38,27,52,.97),rgba(14,10,22,.99));
+  border:1px solid rgba(255,201,120,.24);
+  box-shadow:
+    0 32px 90px rgba(0,0,0,.85),
+    0 0 0 1px rgba(255,255,255,.04) inset,
+    0 1px 0 rgba(255,255,255,.10) inset;
+  text-align:center;
+  animation:sheetIn .28s cubic-bezier(.2,1.15,.4,1) both;
+}
+@keyframes sheetIn{
+  from{opacity:0;transform:translateY(14px) scale(.96)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+/* a thin gold hairline across the top — the premium tell */
+.overlay .sheet::before{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:56%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,201,120,.60),transparent);
+}
+
+.overlay h2{
+  font-size:clamp(19px,2.6vh,24px);font-weight:900;
+  letter-spacing:-.01em;margin:0 0 6px;line-height:1.25;
+}
+
+/* results: stars + two compact stat tiles */
+.stars-big{
+  display:flex;justify-content:center;gap:clamp(8px,2vw,14px);
+  margin:2px 0 clamp(14px,2.4vh,20px);
+}
+.stars-big .ic{
+  width:clamp(30px,5vh,42px);height:clamp(30px,5vh,42px);
+  color:rgba(255,201,120,.16);fill:currentColor;
+  transition:transform .35s cubic-bezier(.2,1.4,.4,1),color .3s,filter .3s;
+}
+.stars-big .ic.on{
+  color:var(--gold);
+  filter:drop-shadow(0 0 16px rgba(255,201,120,.95));
+  transform:scale(1.10);
+}
+/* the three stars light up one after another, not all at once */
+.stars-big .ic:nth-child(1){transition-delay:0s}
+.stars-big .ic:nth-child(2){transition-delay:.09s}
+.stars-big .ic:nth-child(3){transition-delay:.18s}
+
+.res-rows{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px;
+  margin-bottom:clamp(16px,2.6vh,22px);
+}
+.res-rows>div{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:11px 8px;border-radius:14px;
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(255,255,255,.07);
+}
+.res-rows .ic{width:16px;height:16px;margin-bottom:2px}
+.res-rows span{
+  font-size:10px;color:var(--muted);
+  letter-spacing:.14em;text-transform:uppercase;font-weight:700;
+}
+.res-rows b{
+  font-size:clamp(15px,2.2vh,18px);font-weight:900;
+  color:var(--gold);font-variant-numeric:tabular-nums;
+}
+
+/* actions inside a modal: full-width stack, generous tap targets */
+.overlay .actions{
+  display:flex;flex-direction:column;gap:9px;margin-top:0;
+}
+.overlay .actions .btn{
+  width:100%;padding:clamp(12px,1.9vh,15px) 18px;
+  border-radius:14px;font-size:clamp(14px,1.9vh,16px);
+}
+
+/* touch — PHYSICAL sides, never flipped by dir=rtl
+   move pad is always on the LEFT, jump always on the RIGHT */
+#touch{position:absolute;inset:0;pointer-events:none;z-index:15;direction:ltr}
+#touch[hidden]{display:none}
+/* =========================================================
+   TOUCH PADS — raised and made translucent.
+   ---------------------------------------------------------
+   They used to sit 16px off the bottom edge, which put them
+   directly over the ground the player is about to land on, and
+   they were fully opaque so they hid it. Now they float higher
+   (clear of the floor line) and the buttons are see-through, so
+   the level reads through them.
+   ========================================================= */
+.tpad{
+  position:absolute;
+  bottom:calc(max(16px,env(safe-area-inset-bottom)) + clamp(28px,7vh,64px));
+  display:flex;gap:14px;pointer-events:auto;direction:ltr;
+}
+/* left = the "<" arrow, right = the ">" arrow — physical, never mirrored */
+.pad-move{left:max(18px,env(safe-area-inset-left));right:auto;flex-direction:row}
+.pad-jump{right:max(18px,env(safe-area-inset-right));left:auto;flex-direction:row}
+/* #touch is direction:ltr on purpose, so left/right here are physical
+   and identical in RTL and LTR — the move pad never jumps sides */
+/* the "<" button must sit on the LEFT and the ">" on the RIGHT */
+#t-left{order:1}
+#t-right{order:2}
+/* =========================================================
+   TOUCH BUTTONS — translucent, and cheap to animate.
+   ---------------------------------------------------------
+   Two changes, both about feel:
+
+   1. TRANSPARENCY. The fill dropped from .72 alpha to roughly
+      .34, so the platform the player is standing on stays
+      visible through the button. The border and the icon keep
+      full strength, so the control is still easy to find.
+
+   2. ANIMATION COST. The pressed state used to swap the whole
+      `background` — a radial-gradient — which forces the engine
+      to re-rasterise the gradient on every press. That is the
+      single most expensive thing a touch control can do, and it
+      is why the buttons felt sluggish. The gradient is now
+      static and the press is expressed with `opacity` and
+      `transform` only, both of which the compositor handles on
+      the GPU without a repaint.
+   ========================================================= */
+.tbtn{
+  position:relative;
+  width:clamp(58px,10vh,76px);height:clamp(58px,10vh,76px);border-radius:50%;
+  display:grid;place-items:center;
+  border:1px solid rgba(255,201,120,.42);
+  background:radial-gradient(circle at 50% 30%,rgba(60,42,80,.34),rgba(16,11,24,.30));
+  color:var(--txt);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  box-shadow:0 6px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.14);
+  /* only compositor-friendly properties transition */
+  transition:transform .09s ease-out, opacity .09s ease-out, border-color .12s;
+  touch-action:none;-webkit-touch-callout:none;
+  will-change:transform;
+}
+/* touch-action:none removes the browser's 300ms tap delay and stops
+   the page from panning while a control is held down */
+.tbtn .ic{width:44%;height:44%;color:#ffe2b6;opacity:.92;pointer-events:none}
+/* the pressed state is driven by JS (.on) so it reacts on frame 1 */
+.tbtn.on{
+  transform:scale(.93);
+  border-color:rgba(255,201,120,.95);
+  box-shadow:0 0 0 2px rgba(255,201,120,.22),inset 0 0 18px rgba(255,201,120,.30);
+}
+.tbtn.on .ic{opacity:1}
+/* arrows must never mirror under rtl */
+.tbtn .ic{transform:none}
+.tbtn.jump{
+  width:clamp(70px,12vh,92px);height:clamp(70px,12vh,92px);
+  background:radial-gradient(circle at 50% 30%,rgba(255,190,110,.22),rgba(90,50,14,.30));
+  border-color:rgba(255,201,120,.55);
+  box-shadow:0 8px 22px rgba(232,147,63,.22),inset 0 1px 0 rgba(255,255,255,.2);
+}
+.tbtn.jump .ic{width:40%;height:40%;color:#fff0d4}
+
+.about{font-size:14px;line-height:1.95;color:#cfc0ad;white-space:pre-line}
+
+/* ============ TUTORIAL CARD ============ */
+#tut{
+  position:absolute;z-index:16;pointer-events:none;
+  inset-block-start:clamp(64px,11vh,96px);
+  inset-inline-end:clamp(14px,2.4vw,28px);
+  max-width:min(330px,72vw);
+  opacity:0;transform:translateY(-8px);
+  transition:opacity .3s ease,transform .3s ease;
+}
+#tut[hidden]{display:none}
+#tut.show{opacity:1;transform:translateY(0)}
+#tut.muted{opacity:.18}
+.tut-card{
+  pointer-events:auto;
+  background:linear-gradient(165deg,rgba(30,21,42,.92),rgba(12,9,20,.94));
+  border:1px solid rgba(255,201,120,.22);
+  border-radius:16px;
+  padding:13px 15px 12px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 16px 44px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.tut-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}
+.tut-label{
+  font-size:10px;font-weight:800;letter-spacing:.16em;color:var(--gold);
+  text-transform:uppercase;
+}
+.tut-skip{
+  border:0;background:transparent;color:var(--muted);font:inherit;
+  font-size:11px;font-weight:700;cursor:pointer;padding:2px 6px;border-radius:7px;
+  transition:color .2s,background .2s;
+}
+.tut-skip:hover{color:var(--txt);background:rgba(255,255,255,.07)}
+#tut-title{font-size:14px;font-weight:900;color:#ffe9c8;margin-bottom:5px;line-height:1.35}
+#tut-body{font-size:12.5px;line-height:1.75;color:#cfc0ad}
+.tut-dots{display:flex;gap:5px;margin-top:10px}
+.tut-dots i{
+  width:6px;height:6px;border-radius:99px;background:rgba(255,255,255,.16);
+  transition:background .25s,width .25s;
+}
+.tut-dots i.done{background:rgba(255,201,120,.5)}
+.tut-dots i.now{background:var(--gold);width:16px}
+.tut-hint{
+  margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);
+  font-size:10.5px;color:var(--muted);line-height:1.6;
+}
+@media (max-width:760px){
+  #tut{max-width:min(280px,64vw);inset-block-start:60px}
+  #tut-body{font-size:11.5px}
+}
+
+/* =========================================================
+   GAME OVER — its own, calmer treatment.
+   A warmer, redder sheet so it reads as a distinct moment,
+   not just another pause screen. Everything is centred and
+   the two buttons are the only things competing for attention.
+   ========================================================= */
+.overlay .sheet.go{
+  width:min(410px,92vw);
+  border-color:rgba(255,107,122,.26);
+  background:linear-gradient(168deg,rgba(44,24,34,.97),rgba(16,9,14,.99));
+  box-shadow:
+    0 32px 90px rgba(0,0,0,.88),
+    0 0 0 1px rgba(255,107,122,.10) inset,
+    0 1px 0 rgba(255,255,255,.08) inset;
+}
+.overlay .sheet.go::before{
+  background:linear-gradient(90deg,transparent,rgba(255,107,122,.60),transparent);
+}
+/* =========================================================
+   GAME OVER ICON
+   ---------------------------------------------------------
+   The heart was rendering squashed. Cause: `.ic` sets
+   `width:1em;height:1em`, but inside a flex/grid container the
+   SVG is a flex item and `height` can be overridden by the
+   container's line box. With a non-square computed box the
+   symbol inside stretches.
+   Fix: pin the aspect ratio explicitly, stop the icon from
+   being flexed, and force the symbol to preserve its own
+   proportions.
+   ========================================================= */
+.go-icon{
+  width:clamp(48px,7vh,58px);
+  height:clamp(48px,7vh,58px);
+  aspect-ratio:1 / 1;
+  flex:0 0 auto;
+  margin:0 auto clamp(12px,2vh,16px);
+  border-radius:50%;
+  display:grid;place-items:center;
+  background:radial-gradient(circle,rgba(255,107,122,.20),rgba(255,107,122,.03));
+  border:1px solid rgba(255,107,122,.30);
+  animation:goPulse 3.4s ease-in-out infinite;
+}
+@keyframes goPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,107,122,.00)}
+  50%{box-shadow:0 0 0 10px rgba(255,107,122,.06)}
+}
+.go-icon .ic{
+  width:clamp(22px,3.4vh,27px);
+  height:clamp(22px,3.4vh,27px);
+  aspect-ratio:1 / 1;
+  flex:0 0 auto;
+  display:block;
+  overflow:visible;
+  color:#ff6b7a;
+  filter:drop-shadow(0 0 12px rgba(255,107,122,.75));
+}
+.overlay .sheet.go h2{
+  text-align:center;font-size:clamp(18px,2.5vh,22px);margin-bottom:10px;
+}
+.go-line{
+  text-align:center;
+  font-size:clamp(13px,1.85vh,15px);line-height:1.85;
+  color:#f0e2d0;margin:0 0 10px;
+}
+.go-sub{
+  text-align:center;
+  font-size:clamp(11px,1.5vh,12.5px);color:var(--muted);
+  line-height:1.7;
+  padding-top:11px;margin-top:2px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+.overlay .sheet.go .actions{margin-top:clamp(16px,2.6vh,22px)}
+
+/* portrait fallback: rotate the whole stage 90° so the game is always landscape.
+   `dvh` here matters more than anywhere else: the rotated stage is sized from
+   the viewport's two axes, so if the height is the stale layout height the
+   bottom edge of the rotated game slides under the URL bar. */
+body.rotated #stage{
+  position:fixed;top:0;left:0;
+  width:100vh;height:100vw;
+  width:100dvh;height:100dvw;
+  transform-origin:top left;
+  transform:rotate(90deg) translateY(-100vw);
+  transform:rotate(90deg) translateY(-100dvw);
+  padding:0;
+}
+
+@media (max-width:900px) and (orientation:landscape){
+  .menu-wrap{padding-block:14px;padding-inline:clamp(16px,3vw,36px)}
+}
+/* =========================================================
+   SMALL SCREENS — the rotating light rays are the most
+   expensive decorative element on the menu (a conic-gradient
+   being rotated every frame). On a phone they cost more than
+   they add, so they are dimmed hard and then removed entirely.
+   ========================================================= */
+@media (max-width:760px), (max-height:520px){
+  .lamp-rays{opacity:.35}
+}
+@media (max-width:520px), (max-height:430px){
+  .lamp-rays{display:none}
+}
+/* narrow / stacked layout — phones held landscape with a short width */
+@media (max-width:760px){
+  .menu-wrap{
+    grid-template-columns:1fr;
+    grid-template-rows:auto 1fr;
+    gap:clamp(8px,2vh,18px);
+    padding-block:clamp(10px,2.4vh,24px);
+    padding-inline:clamp(16px,4vw,32px);
+  }
+  .menu-hero{order:1;gap:0}
+  .menu-actions{order:2;max-width:100%}
+  .lamp{width:clamp(44px,8vh,72px);height:clamp(44px,8vh,72px)}
+  .title{font-size:clamp(32px,7.4vh,60px)}
+  .sub{margin-top:2px}
+}
+@media (max-height:430px){
+  .menu-wrap{padding-block:10px;padding-inline:22px;gap:12px}
+  .hero-stats{margin-bottom:4px;padding:5px 12px}
+  .menu-actions{gap:6px}
+  .btn{padding:9px 16px;border-radius:12px}
+  .menu-foot{margin-top:0;padding-top:6px}
+  .lamp{width:54px;height:54px}
+  .title{font-size:clamp(30px,9vh,52px)}
+  .lamp-rays{display:none}
+}
+@media (max-width:520px){
+  .sheet{padding:18px 15px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(70px,1fr))}
+}
+
+/* very short screens: shrink the modal chrome so the buttons
+   always stay above the fold without any scrolling */
+@media (max-height:560px){
+  .overlay .sheet{padding:16px 18px;border-radius:18px}
+  .overlay h2{font-size:18px;margin-bottom:4px}
+  .stars-big{margin:0 0 12px}
+  .stars-big .ic{width:28px;height:28px}
+  .res-rows{margin-bottom:12px}
+  .res-rows>div{padding:8px 6px}
+  .overlay .actions .btn{padding:10px 16px;font-size:14px}
+  .go-icon{width:42px;height:42px;margin-bottom:10px}
+  .go-line{font-size:12.5px;line-height:1.7;margin-bottom:6px}
+  .go-sub{font-size:11px;padding-top:8px}
+}
+
+/* respect the OS "reduce motion" setting — no animation, no spin */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.001ms !important;
+  }
+  .lamp-rays{display:none}
+}
