@@ -277,6 +277,71 @@ Builder.prototype.ensureGround = function(x0, x1){
 };
 
 /* =========================================================
+   SPAWN PAD — a hard guarantee that the player starts on ground.
+   ---------------------------------------------------------
+   `ensureGround` SAMPLES the strip in 40-unit steps and only
+   accepts platforms sitting exactly on y = 500. That leaves three
+   ways a level can still open over thin air:
+
+     · a gap narrower than the sampling step, straddling a probe
+     · a floating stone over the spawn counted as ground, when the
+       player would land on it and immediately slide off the edge
+     · the strip ending at 260 while the player box is 26 wide
+
+   This function does not sample. It asks the exact question the
+   physics engine asks on the first frame:
+
+     "Is there a solid top at or below the spawn height that covers
+      the player's entire footprint?"
+
+   `spawn` is authored at x = 80 with a 26-wide player, so the
+   footprint is 80 .. 106. If nothing covers it, a real floor is
+   laid from x = 0 to 420 — wide enough to give the camera a
+   runway and to make the first step safe.
+
+   It is a FLOOR at GROUND_Y, not a floating stone: a platform
+   hovering over the spawn would satisfy a naive overlap test while
+   still letting the player fall past its edge.
+
+   Any floating stone left inside the pad footprint is removed, so
+   nothing can shadow the ground the player is standing on.
+
+   Returns true when a pad had to be laid.
+   ========================================================= */
+Builder.prototype.ensureSpawnPad = function(){
+  const SPAWN_X  = 80;
+  const PLAYER_W = TUNE.PLAYER_W;
+  const padTo    = SPAWN_X + PLAYER_W + 314;   /* 420 */
+
+  /* ---- 1 · is the footprint already covered by a real floor? ---- */
+  let covered = false;
+  for(let i=0;i<this.plats.length;i++){
+    const p = this.plats[i];
+    if(Math.abs(p[1] - TUNE.GROUND_Y) > 2) continue;   /* floor only */
+    if(p[0] <= SPAWN_X && p[0] + p[2] >= SPAWN_X + PLAYER_W){
+      covered = true;
+      break;
+    }
+  }
+  if(covered) return false;
+
+  /* ---- 2 · lay the pad. `floor()` refuses anything under 40 wide,
+              so a 420-wide pad is always legal. ---- */
+  this.floor(0, padTo);
+
+  /* ---- 3 · clear anything floating inside the pad footprint.
+              A stone hovering over the spawn is not ground, and the
+              player would land on it and slide straight off. ---- */
+  for(let i=this.plats.length-1;i>=0;i--){
+    const p = this.plats[i];
+    if(Math.abs(p[1] - TUNE.GROUND_Y) <= 2) continue;  /* keep floors */
+    if(p[0] < padTo && p[0] + p[2] > 0) this.plats.splice(i,1);
+  }
+
+  return true;
+};
+
+/* =========================================================
    FLOATING PLATFORM — with a MEANINGFUL-CLEARANCE rule.
    ---------------------------------------------------------
    THE "STONE WITH NO REASON" PROBLEM
@@ -1876,7 +1941,45 @@ function buildLevel(index){
      nothing. Filling the first 260 units fixes that completely
      and leaves the rest of the level exactly as designed.
      ========================================================= */
-  B.ensureGround(0, 260);
+     B.ensureGround(0, 260);
+
+   /* =========================================================
+      SPAWN PAD — the guarantee that ends the whole class of bug.
+      ---------------------------------------------------------
+      THE BUG THIS FIXES
+      ------------------
+      A level could open with a segment whose first solid ground
+      does not start at x = 0:
+
+        segStairs  → landing floor at x0 + w*0.80   (400..640)
+        segIsland  → B.floor(x0, 130)               (0..130 only)
+        segCrumble → B.floor(x0, 140)
+        segLava    → B.floor(x0, 150)
+        segMover   → B.floor(x0, 150)
+        segRiseFall→ B.floor(x0, 150)
+
+      `ensureGround(0, 260)` was meant to cover that, but it walks
+      the strip in 40-unit steps and only tests platforms sitting
+      exactly on y = 500. Three things could therefore slip through:
+
+        · a gap narrower than the sampling step, straddling a probe
+        · a floating platform over the spawn being counted as ground
+          when the player would land on it and immediately slide off
+        · the strip ending at 260 while the player box is 26 wide
+          and the camera starts at 42% — the first frame of the
+          level could still be over air
+
+      This function does not sample. It asks the exact question the
+      physics asks: "is there a solid top under the player's whole
+      footprint, at or below the spawn height, that they can stand
+      on?" If the answer is no, it lays a pad that is guaranteed to
+      be wide enough and tall enough that the answer becomes yes.
+
+      It runs LAST, after every segment and every top-up, so no
+      later placement can undo it. It only ever adds geometry.
+      ========================================================= */
+   B.ensureSpawnPad();
+
 
   /* =========================================================
      CHECKPOINT VALIDATION
