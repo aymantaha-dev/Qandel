@@ -24,7 +24,7 @@
    ========================================================= */
 
 /* bump this string on every deploy — it retires the old cache */
-const VERSION = 'qandil-v2';
+const VERSION = 'qandil-v3';
 const CACHE   = VERSION;
 
 /* The shell. Every file the game needs to boot and be playable
