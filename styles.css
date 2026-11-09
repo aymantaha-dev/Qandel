@@ -5,31 +5,32 @@
   --r:18px;
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+
 /* =========================================================
    VIEWPORT HEIGHT
-   ---------------------------------------------------------
-   `100%` on html/body resolves against the LAYOUT viewport,
-   which on a phone is the tallest the URL bar will ever let it
-   be. When the bar slides back in, the bottom of the page is
-   pushed out of view and the touch pads end up half off-screen.
-   `100dvh` tracks the DYNAMIC viewport — it shrinks and grows
-   with the bar, so the game always fits the pixels that are
-   actually visible. The `100%` line stays first as a fallback
-   for engines without dvh support.
+   `100%` resolves against the LAYOUT viewport, which on a
+   phone is the tallest the URL bar will ever let it be.
+   When the bar slides back in, the bottom of the page is
+   pushed out of view and the touch pads end up half off-
+   screen. `100dvh` tracks the DYNAMIC viewport, so the game
+   always fits the pixels that are actually visible.
    ========================================================= */
 html,body{height:100%;height:100dvh;overflow:hidden;background:var(--bg)}
 body{
   font-family:'Cairo',system-ui,-apple-system,'Segoe UI',sans-serif;
   color:var(--txt);user-select:none;
-  /* no rubber-banding, no pull-to-refresh stealing a jump */
   overscroll-behavior:none;
 }
 html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',sans-serif}
 
-/* `inset:0` already fills the viewport, but on a notched phone the
-   stage must also stay clear of the notch and the home indicator.
-   The padding is added to the stage, not the canvas, so the canvas
-   keeps its 100% and simply gets a smaller box to fill. */
+/* =========================================================
+   STAGE
+   `inset:0` fills the viewport; the safe-area padding keeps
+   the playfield clear of notches and the home indicator.
+   The padding lives on the stage, not the canvas, so the
+   canvas keeps its 100% and simply gets a smaller box to
+   fill.
+   ========================================================= */
 #stage{position:fixed;inset:0;display:grid;place-items:center;overflow:hidden;
   background:radial-gradient(circle at 50% 45%,#150d1e 0%,#08060f 62%,#04030a 100%);
   padding:env(safe-area-inset-top) env(safe-area-inset-right)
@@ -42,10 +43,8 @@ html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',san
 
 /* =========================================================
    ICONS
-   `aspect-ratio` is set here so an SVG symbol can never be
-   stretched into an oval by a flex/grid parent, no matter
-   where it is used. `flex:0 0 auto` stops the parent from
-   resizing it.
+   `aspect-ratio` is pinned so an SVG symbol can never be
+   stretched into an oval by a flex or grid parent.
    ========================================================= */
 .ic{
   width:1em;height:1em;
@@ -56,21 +55,8 @@ html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',san
 }
 .ic.gold{color:var(--gold)}
 
-/* ============ MENU (full-bleed, no scroll) ============ */
+/* ============ MENU ============ */
 #scr-menu{padding:0;place-items:stretch}
-/* =========================================================
-   MENU LAYOUT
-   ---------------------------------------------------------
-       `minmax(0,1fr)` lets a column collapse to zero width when the
-    container's own size is momentarily wrong — which is exactly
-    what happens during a viewport transition, before `resize` has
-    re-measured the stage. The buttons then pile into one corner
-    until something forces a reflow.
-
-   `minmax(min(240px,100%),1fr)` gives each column a floor, so
-   the layout can never collapse. `place-content:center` keeps
-   the whole grid centred even if both columns hit their floor.
-   ========================================================= */
 .menu-wrap{
   position:relative;width:100%;height:100%;
   display:grid;
@@ -81,8 +67,6 @@ html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',san
   padding-block:clamp(16px,3.4vh,44px);
   padding-inline:clamp(20px,4.5vw,80px);
 }
-/* logical ordering — the hero always leads, actions always trail,
-   in both RTL and LTR, without any left/right hard-coding */
 .menu-hero{order:1}
 .menu-actions{order:2}
 
@@ -133,12 +117,9 @@ html[lang="en"] .title{font-family:'Outfit',sans-serif;letter-spacing:.1em;font-
 html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-transform:uppercase}
 
 /* =========================================================
-   PROGRESS CARD — the stars / levels readout.
-   It used to sit flush against the buttons with only 4-8px of
-   air, so it looked like the first row of the menu instead of
-   a separate readout. Now it is a real card: its own surface,
-   a gold hairline on top, two equal halves, and clear space
-   below it before the primary action starts.
+   PROGRESS CARD
+   A dedicated card with a gold hairline on top, two equal
+   halves, and clear space below before the primary action.
    ========================================================= */
 .hero-stats{
   position:relative;
@@ -154,13 +135,11 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
     0 10px 30px rgba(0,0,0,.28);
   overflow:hidden;
 }
-/* the same gold hairline the modals use — ties the UI together */
 .hero-stats::before{
   content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
   width:52%;height:1px;
   background:linear-gradient(90deg,transparent,rgba(255,201,120,.45),transparent);
 }
-/* each half is a centred stack: value on top, label beneath */
 .hstat{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:3px;min-width:0;padding-inline:6px;
@@ -174,15 +153,11 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
   color:var(--muted);font-size:clamp(9.5px,1.35vh,11px);
   font-weight:700;letter-spacing:.10em;white-space:nowrap;
 }
-/* the divider is a full-height column rule, not a floating tick */
-.sep{
-  display:none;
-}
+.sep{display:none}
 .hero-stats .hstat + .hstat{
   border-inline-start:1px solid rgba(255,201,120,.14);
 }
 
-/* actions column */
 .menu-actions{
   display:flex;flex-direction:column;gap:clamp(8px,1.5vh,14px);
   width:100%;max-width:min(430px,100%);justify-self:center;min-width:0;
@@ -190,10 +165,10 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
 .menu-row{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,1.5vh,14px)}
 
 /* =========================================================
-   PRIMARY ACTION — "Begin Journey" is the one thing a new
-   player must find, so it gets a real size advantage over the
-   secondary buttons: taller, wider type, a stronger shadow and
-   a wider sheen. Everything else stays deliberately quiet.
+   PRIMARY ACTION
+   The one button a new player must find. It gets a real
+   size advantage over secondary buttons: taller, wider
+   type, a stronger shadow, a wider sheen.
    ========================================================= */
 #btn-play{
   padding-block:clamp(14px,2.4vh,21px);
@@ -208,7 +183,6 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
   box-shadow:0 20px 52px rgba(232,147,63,.60),inset 0 1px 0 rgba(255,255,255,.65);
 }
 #btn-play:active{transform:translateY(0) scale(.985)}
-/* a wider, slower sheen reads as a highlight rather than a glint */
 #btn-play::after{width:70%}
 
 .btn{
@@ -234,7 +208,6 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
 .btn.ghost{background:transparent;border-color:transparent;color:var(--muted);font-weight:600}
 .btn.ghost:hover{color:var(--txt);background:rgba(255,255,255,.05)}
 .btn.ghost .ic{color:currentColor}
-/* quiet = low-emphasis secondary action, still tappable */
 .btn.quiet{
   background:transparent;border-color:rgba(255,255,255,.07);color:var(--muted);
   font-weight:600;font-size:clamp(13px,1.7vh,15px);
@@ -279,26 +252,19 @@ html[dir="rtl"] .btn.primary::after{
 .chip.off{opacity:.45}
 .chip.off .ic{color:var(--muted)}
 
-/* ---------- screens ---------- */
+/* ============ SCREENS ============ */
 .screen{
   position:absolute;inset:0;display:grid;place-items:center;padding:24px;
   opacity:0;pointer-events:none;transition:opacity .32s ease, transform .32s ease;
   transform:scale(.985);
 }
 .screen.active{opacity:1;pointer-events:auto;transform:scale(1)}
+
 /* =========================================================
-   SCREENS (levels / settings / about)
-   ---------------------------------------------------------
-   Two bugs were visible on a phone:
-     1. `overflow:auto` + `border-radius` lets the scrollbar
-        paint OUTSIDE the rounded corner, so its ends poked out
-        past the sheet edge.
-     2. A styled scrollbar inside a rounded box always looks
-        like a foreign object.
-   Fix: the scrollbar is hidden entirely and the sheet keeps a
-   small inset so content never touches the rounded edge.
-   The sheet still scrolls — it just does it invisibly, which
-   is the normal pattern for touch UIs.
+   SHEET
+   A scroll container whose scrollbar is hidden on purpose:
+   a styled scrollbar inside a rounded box always looks like
+   a foreign object. The sheet still scrolls, invisibly.
    ========================================================= */
 .sheet{
   width:min(560px,94vw);max-height:92vh;
@@ -309,17 +275,15 @@ html[dir="rtl"] .btn.primary::after{
   backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
   box-shadow:0 26px 80px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.06);
   overscroll-behavior:contain;
-  scrollbar-width:none;              /* Firefox */
-  -ms-overflow-style:none;           /* old Edge / IE */
+  scrollbar-width:none;
+  -ms-overflow-style:none;
 }
-/* WebKit: hide the bar completely — no thumb, no track, no ends */
 .sheet::-webkit-scrollbar{width:0;height:0;display:none}
 .sheet.wide{width:min(820px,95vw)}
 .sheet.center{text-align:center}
 
 .actions{display:flex;flex-direction:column;gap:10px;margin-top:22px}
 
-/* bars & rows */
 .bar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
 .bar h2{font-size:clamp(17px,2.4vh,22px);font-weight:900;flex:1}
 .icon{
@@ -344,7 +308,9 @@ html[dir="rtl"] .btn.primary::after{
 }
 .seg button.on{background:linear-gradient(180deg,#ffd28c,var(--gold2));color:#231507}
 
-/* levels grid */
+/* =========================================================
+   LEVEL GRID
+   ========================================================= */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:9px}
 .world-head{grid-column:1/-1;display:flex;align-items:center;gap:10px;margin:12px 0 2px;font-size:12px;font-weight:800;color:var(--gold);letter-spacing:.08em}
 .world-head::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
@@ -363,22 +329,13 @@ html[dir="rtl"] .btn.primary::after{
 .lv.locked{opacity:.4;cursor:not-allowed;filter:grayscale(.75)}
 .lv.locked:hover{transform:none;box-shadow:none;border-color:var(--line)}
 .lv .lk{position:absolute;top:6px;inset-inline-end:6px;width:13px;height:13px;color:var(--muted);opacity:.8}
+.lv:disabled{pointer-events:none}
 
 /* =========================================================
-   LEVEL TILE — THREE STATES, THREE READS
-   ---------------------------------------------------------
-   The grid used to have two states: locked and open. A level you
-   had finished looked identical to a level you had merely
-   opened, so the screen could not tell you where you were.
-
-   Now there is a third state. `done` is applied to any level with
-   at least one star, and it gets a warm ring plus a lit number so
-   a finished level is instantly distinguishable from a fresh one.
-
-   The ring is drawn with `box-shadow` rather than `border` on
-   purpose: a border would change the box size and make the grid
-   reflow between states, which reads as a jitter as stars are
-   earned.
+   LEVEL TILE — three states, three reads.
+   A finished level wears a warm ring and a lit number.
+   The ring is drawn with box-shadow so the box size never
+   changes between states and the grid never reflows.
    ========================================================= */
 .lv.done{
   border-color:rgba(255,201,120,.42);
@@ -390,11 +347,45 @@ html[dir="rtl"] .btn.primary::after{
   border-color:rgba(255,201,120,.85);
   box-shadow:0 0 0 1px rgba(255,201,120,.30) inset, 0 14px 32px rgba(0,0,0,.6);
 }
-/* a locked tile is never focusable or clickable — the disabled
-   attribute handles the behaviour, this handles the look */
-.lv:disabled{pointer-events:none}
 
-/* hud */
+/* =========================================================
+   LEVEL TILE — the next level to play.
+   The first open level with no stars yet. A slow, breathing
+   halo on a pseudo-element marks it as the destination
+   without competing with :hover or :active transforms.
+   ========================================================= */
+.lv.next{
+  border-color:rgba(255,201,120,.75);
+  background:linear-gradient(168deg,rgba(255,201,120,.22),rgba(255,201,120,.05));
+  box-shadow:
+    0 0 0 1px rgba(255,201,120,.32) inset,
+    0 8px 22px rgba(232,147,63,.32);
+}
+.lv.next b{color:#fff3dc}
+.lv.next:hover{
+  border-color:rgba(255,225,180,.95);
+  box-shadow:
+    0 0 0 1px rgba(255,201,120,.55) inset,
+    0 14px 32px rgba(232,147,63,.55);
+}
+.lv.next::after{
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:15px;
+  border:1.5px solid rgba(255,201,120,.7);
+  box-shadow:0 0 16px rgba(255,201,120,.5);
+  pointer-events:none;
+  animation:nextPulse 2.4s ease-in-out infinite;
+}
+@keyframes nextPulse{
+  0%,100%{opacity:.35}
+  50%{opacity:1}
+}
+
+/* =========================================================
+   HUD
+   ========================================================= */
 #hud{
   position:absolute;inset-block-start:0;inset-inline:0;
   padding-block:14px;padding-inline:18px;
@@ -435,15 +426,10 @@ html[dir="rtl"] .btn.primary::after{
 .oil-bar i{display:block;height:100%;width:100%;border-radius:99px;background:linear-gradient(90deg,#ffb35c,#ffe3a8);transition:width .18s}
 
 /* =========================================================
-   OVERLAYS — no scrolling, everything visible at once.
-   ---------------------------------------------------------
-   The old sheets used `max-height:92vh` + `overflow:auto`, so
-   on a short phone the buttons fell below the fold and the
-   player had to scroll a modal to find "Retry". A modal that
-   scrolls is a broken modal.
-   Now: the sheet sizes to its content, is capped by `100dvh`
-   (which accounts for the mobile URL bar), and never scrolls.
-   The content itself is compact enough to always fit.
+   OVERLAYS
+   The sheet sizes to its content, is capped by `100dvh`,
+   and never forces the player to scroll a modal to reach a
+   button.
    ========================================================= */
 .overlay{
   position:absolute;inset:0;z-index:20;
@@ -456,24 +442,6 @@ html[dir="rtl"] .btn.primary::after{
 .overlay[hidden]{display:none}
 @keyframes ovIn{from{opacity:0}to{opacity:1}}
 
-@keyframes pop{from{transform:scale(.9);opacity:0}to{transform:scale(1);opacity:1}}
-
-/* =========================================================
-   MODAL SHEET
-   ---------------------------------------------------------
-   The old rule was `overflow:hidden` with the comment "no
-   scrolling, ever". That was the wrong call: a modal that fits
-   is fine, but a modal whose content is taller than the viewport
-   — the About screen, a long game-over line, a results sheet on
-   a small phone — simply CUT ITS OWN CONTENT OFF, with no way to
-   reach it. The buttons at the bottom became unreachable.
-
-   Correct behaviour: the sheet is a scroll container, but the
-   scrollbar is invisible (the standard touch-UI pattern) and the
-   content is padded so nothing sits flush against the rounded
-   edge. If everything fits, nothing scrolls and it looks
-   identical to before.
-   ========================================================= */
 .overlay .sheet{
   position:relative;
   width:min(430px,92vw);
@@ -503,32 +471,18 @@ html[dir="rtl"] .btn.primary::after{
   to{opacity:1;transform:translateY(0) scale(1)}
 }
 
-/* a thin gold hairline across the top — the premium tell */
 .overlay .sheet::before{
   content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
   width:56%;height:1px;
   background:linear-gradient(90deg,transparent,rgba(255,201,120,.60),transparent);
 }
 
-/* =========================================================
-   MODAL TYPOGRAPHY & SPACING
-   ---------------------------------------------------------
-   The old sheet set a 6px bottom margin on the heading and let
-   everything else collapse against it, so the title, the body
-   and the buttons read as one block of text with no hierarchy.
-
-   Now every block has its own rhythm: the heading sits clear of
-   what follows, the body has real line-height, and the action
-   stack is separated by a rule so the buttons are unmistakably
-   the last thing on the sheet.
-   ========================================================= */
 .overlay h2{
   font-size:clamp(19px,2.6vh,24px);font-weight:900;
   letter-spacing:-.01em;
   margin:0 0 clamp(8px,1.4vh,12px);
   line-height:1.3;
 }
-/* body copy inside a modal */
 .overlay p{
   font-size:clamp(13px,1.85vh,15px);
   line-height:1.85;
@@ -539,10 +493,9 @@ html[dir="rtl"] .btn.primary::after{
 
 /* =========================================================
    PASS-MARK LINE
-   ---------------------------------------------------------
-   One short sentence under the result title that says whether the
-   next level opened — and, when it did not, exactly what is
-   missing. A locked door with no explanation reads as a bug.
+   One sentence under the result title that says whether
+   the next level opened, and when it did not, exactly
+   what is missing.
    ========================================================= */
 .res-sub{
   margin:0 0 clamp(10px,1.8vh,14px);
@@ -555,7 +508,7 @@ html[dir="rtl"] .btn.primary::after{
 }
 .res-sub:empty{display:none}
 
-/* results: stars + two compact stat tiles */
+/* ============ RESULTS ============ */
 .stars-big{
   display:flex;justify-content:center;
   gap:clamp(8px,2vw,14px);
@@ -571,7 +524,6 @@ html[dir="rtl"] .btn.primary::after{
   filter:drop-shadow(0 0 16px rgba(255,201,120,.95));
   transform:scale(1.10);
 }
-/* the three stars light up one after another, not all at once */
 .stars-big .ic:nth-child(1){transition-delay:0s}
 .stars-big .ic:nth-child(2){transition-delay:.09s}
 .stars-big .ic:nth-child(3){transition-delay:.18s}
@@ -596,14 +548,6 @@ html[dir="rtl"] .btn.primary::after{
   color:var(--gold);font-variant-numeric:tabular-nums;
 }
 
-/* =========================================================
-   MODAL ACTIONS
-   ---------------------------------------------------------
-   The buttons used to sit flush against the text above them, so
-   on a results sheet the "Next level" button looked like part of
-   the stats row. A hairline rule plus real separation makes the
-   action stack read as its own block.
-   ========================================================= */
 .overlay .actions{
   display:flex;flex-direction:column;
   gap:clamp(8px,1.4vh,11px);
@@ -618,50 +562,23 @@ html[dir="rtl"] .btn.primary::after{
   font-size:clamp(14px,1.9vh,16px);
 }
 
-/* touch — PHYSICAL sides, never flipped by dir=rtl
-   move pad is always on the LEFT, jump always on the RIGHT */
+/* ============ TOUCH ============ */
 #touch{position:absolute;inset:0;pointer-events:none;z-index:15;direction:ltr}
 #touch[hidden]{display:none}
-/* =========================================================
-   TOUCH PADS — raised and made translucent.
-   ---------------------------------------------------------
-   They used to sit 16px off the bottom edge, which put them
-   directly over the ground the player is about to land on, and
-   they were fully opaque so they hid it. Now they float higher
-   (clear of the floor line) and the buttons are see-through, so
-   the level reads through them.
-   ========================================================= */
 .tpad{
   position:absolute;
   bottom:calc(max(16px,env(safe-area-inset-bottom)) + clamp(28px,7vh,64px));
   display:flex;gap:14px;pointer-events:auto;direction:ltr;
 }
-/* left = the "<" arrow, right = the ">" arrow — physical, never mirrored */
 .pad-move{left:max(18px,env(safe-area-inset-left));right:auto;flex-direction:row}
 .pad-jump{right:max(18px,env(safe-area-inset-right));left:auto;flex-direction:row}
-/* #touch is direction:ltr on purpose, so left/right here are physical
-   and identical in RTL and LTR — the move pad never jumps sides */
-/* the "<" button must sit on the LEFT and the ">" on the RIGHT */
 #t-left{order:1}
 #t-right{order:2}
+
 /* =========================================================
-   TOUCH BUTTONS — translucent, and cheap to animate.
-   ---------------------------------------------------------
-   Two changes, both about feel:
-
-   1. TRANSPARENCY. The fill dropped from .72 alpha to roughly
-      .34, so the platform the player is standing on stays
-      visible through the button. The border and the icon keep
-      full strength, so the control is still easy to find.
-
-   2. ANIMATION COST. The pressed state used to swap the whole
-      `background` — a radial-gradient — which forces the engine
-      to re-rasterise the gradient on every press. That is the
-      single most expensive thing a touch control can do, and it
-      is why the buttons felt sluggish. The gradient is now
-      static and the press is expressed with `opacity` and
-      `transform` only, both of which the compositor handles on
-      the GPU without a repaint.
+   TOUCH BUTTONS
+   Translucent so the level reads through them, and
+   compositor-friendly so the press lands on frame 1.
    ========================================================= */
 .tbtn{
   position:relative;
@@ -672,22 +589,17 @@ html[dir="rtl"] .btn.primary::after{
   color:var(--txt);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   box-shadow:0 6px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.14);
-  /* only compositor-friendly properties transition */
   transition:transform .09s ease-out, opacity .09s ease-out, border-color .12s;
   touch-action:none;-webkit-touch-callout:none;
   will-change:transform;
 }
-/* touch-action:none removes the browser's 300ms tap delay and stops
-   the page from panning while a control is held down */
 .tbtn .ic{width:44%;height:44%;color:#ffe2b6;opacity:.92;pointer-events:none}
-/* the pressed state is driven by JS (.on) so it reacts on frame 1 */
 .tbtn.on{
   transform:scale(.93);
   border-color:rgba(255,201,120,.95);
   box-shadow:0 0 0 2px rgba(255,201,120,.22),inset 0 0 18px rgba(255,201,120,.30);
 }
 .tbtn.on .ic{opacity:1}
-/* arrows must never mirror under rtl */
 .tbtn .ic{transform:none}
 .tbtn.jump{
   width:clamp(70px,12vh,92px);height:clamp(70px,12vh,92px);
@@ -697,8 +609,7 @@ html[dir="rtl"] .btn.primary::after{
 }
 .tbtn.jump .ic{width:40%;height:40%;color:#fff0d4}
 
-/* the About text is long — it must scroll inside its sheet, and
-   it must breathe while doing so */
+/* About text is long — it scrolls inside its sheet. */
 .about{
   font-size:clamp(13px,1.8vh,14.5px);
   line-height:2.05;
@@ -708,27 +619,12 @@ html[dir="rtl"] .btn.primary::after{
   padding-block:2px;
 }
 
-/* ============ TUTORIAL CARD ============ */
-/* =========================================================
-   TUTORIAL ANCHOR
-   ---------------------------------------------------------
-   The card is pinned to the top-inline-end corner, but it must
-   never be able to run off the BOTTOM of the screen. The old
-   rule only set a top offset, so on a short viewport the card's
-   own height pushed its footer past the visible area.
-
-   `max-height` here is expressed against the space left BELOW
-   the top offset, so the card is bounded by the viewport no
-   matter how tall its content is. The card itself then decides
-   how much of that it uses.
-   ========================================================= */
+/* ============ TUTORIAL ============ */
 #tut{
   position:absolute;z-index:16;pointer-events:none;
   inset-block-start:clamp(56px,10dvh,92px);
   inset-inline-end:clamp(12px,2.4vw,28px);
   max-width:min(340px,74vw);
-  /* never taller than the room between the top offset and the
-     bottom of the visible viewport */
   max-height:calc(100dvh - clamp(56px,10dvh,92px) - clamp(16px,3dvh,40px));
   display:flex;flex-direction:column;
   opacity:0;transform:translateY(-8px);
@@ -737,42 +633,12 @@ html[dir="rtl"] .btn.primary::after{
 #tut[hidden]{display:none}
 #tut.show{opacity:1;transform:translateY(0)}
 #tut.muted{opacity:.18}
+
 /* =========================================================
    HAZARD CARD
-   ---------------------------------------------------------
-   The same card, a different job. The controls tutorial is a
-   sequence the player walks through; a hazard card is a single
-   one-off note that appears the first time they meet a saw, a
-   nail row, a rising stone and so on.
-
-   It borrows the card's surface but drops the sequence chrome —
-   no dots, no arrows — and gets a warmer border so it reads as
-   a warning rather than a lesson.
-   ========================================================= */
-/* =========================================================
-   HAZARD CARD — must be READABLE over a dark, moving world
-   ---------------------------------------------------------
-   THE PROBLEM
-   -----------
-   The card sat on top of a night-time level with a lot of light
-   bleeding through it: the lantern glow, the moon shafts, the
-   checkpoint lights. Its own surface was translucent enough that
-   the scene showed straight through the text, and the paragraph
-   became unreadable exactly when the player needed to read it —
-   mid-jump, with a saw coming.
-
-   A note that cannot be read is worse than no note: it covers the
-   play area and teaches nothing.
-
-   THE FIX
-   -------
-   · the surface is now effectively opaque (0.98 / 0.99) — the
-     world does not come through it at all
-   · a solid 1px warm border plus an inner highlight gives the card
-     an edge against the dark background
-   · a much stronger drop shadow separates it from the scene
-   · the body text is lifted from #cfc0ad to #f0e2d0 so it holds
-     contrast at small sizes on a phone
+   The card's own surface is nearly opaque, so a night-time
+   level does not bleed through the text. The body copy is
+   lifted to hold contrast at small sizes.
    ========================================================= */
 #tut.hazard .tut-card{
   border:1px solid rgba(255,150,90,.55);
@@ -786,67 +652,32 @@ html[dir="rtl"] .btn.primary::after{
   -webkit-backdrop-filter:none;
 }
 #tut.hazard .tut-label{color:#ffb98a}
-#tut.hazard .tut-label::after{content:' · تحذير'}
-html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
+#tut.hazard .tut-label::after{content:attr(data-suffix)}
 #tut.hazard #tut-title{color:#ffe0c8}
 
-/* =========================================================
-   A HAZARD CARD IS NEVER DIMMED
-   ---------------------------------------------------------
-   `#tut.muted{opacity:.18}` exists so the controls tutorial can
-   step out of the way while the pause menu is open. But a hazard
-   card is not part of that sequence — it is a one-off warning
-   that appears mid-run, and it must never be affected by the
-   muted state.
-
-   The `muted` class is toggled by `togglePause` on the shared
-   `#tut` node, so without this rule a pause taken while a hazard
-   card was on screen left the card at 18% opacity even after the
-   game resumed — a ghost of a warning, permanently unreadable.
-
-   This rule wins on specificity (`#tut.hazard` beats `#tut.muted`)
-   and restores full opacity unconditionally.
-   ========================================================= */
+/* a hazard card is never dimmed */
 #tut.hazard{opacity:1}
 #tut.hazard.muted{opacity:1}
 #tut.hazard #tut-body{color:#f0e2d0}
 #tut.hazard #tut-scroll{padding-inline-end:4px}
 #tut.hazard .tut-foot{display:none}
 #tut.hazard .tut-hint{display:none}
+
 /* =========================================================
    TUTORIAL CARD
-   ---------------------------------------------------------
-   The card had no height limit and no internal scroll, so on a
-   short screen the paragraph simply ran past the rounded border
-   and the rest of the text was unreachable — there was nothing
-   to scroll, because the card itself was not a scroll container.
+   A three-part column: fixed header, scrollable body, fixed
+   footer. The body is the only part that scrolls, so the
+   controls never move out of reach.
 
-   Now the card is a three-part column: a fixed header, a
-   scrollable body, and a fixed footer with the dots and the
-   next/prev buttons. The body is the only part that scrolls, so
-   the controls never move out of reach.
-
-   SIZING — why `dvh` and not `vh`
-   -------------------------------
-   `vh` on a phone is the LARGEST the viewport can be, i.e. the
-   height with the URL bar hidden. A card capped at `56vh` can
-   therefore be taller than the screen the player is actually
-   looking at, and its footer buttons end up under the browser
-   chrome. `dvh` tracks the visible height, so the card always
-   fits what is on screen.
-
-   The card also has a FLOOR as well as a ceiling: on a very tall
-   screen it should not stretch to half the display, and on a
-   very short one it must not collapse to a sliver. `clamp()`
-   gives it a comfortable middle.
+   The card is capped by `dvh` (not `vh`) so it always fits
+   what is on screen, and given a FLOOR with `clamp()` so it
+   never collapses to a sliver on a tall screen.
    ========================================================= */
 .tut-card{
   pointer-events:auto;
   display:flex;flex-direction:column;
 
-  /* ceiling: never taller than the visible viewport allows */
   max-height:clamp(150px, 52dvh, 400px);
-  /* and never wider than the space the card is given */
   max-width:100%;
 
   background:linear-gradient(165deg,rgba(30,21,42,.94),rgba(12,9,20,.96));
@@ -857,21 +688,9 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
   box-shadow:0 16px 44px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.06);
   overflow:hidden;
 }
-/* =========================================================
-   THE SCROLL REGION
-   ---------------------------------------------------------
-   `min-height:0` is not cosmetic. A flex item's default
-   `min-height` is `auto`, which resolves to its CONTENT height —
-   so the item refuses to shrink below its text, the card
-   overflows, and `overflow-y:auto` never has anything to scroll.
-   That is exactly why the text was unreachable before.
-
-   With `min-height:0` the item is allowed to be shorter than its
-   content, which is the precondition for a scrollbar to appear.
-
-   `flex:1 1 auto` lets it take the leftover space after the
-   header and footer, and give it back on a short screen.
-   ========================================================= */
+/* `min-height:0` is what makes the scroll actually happen:
+   without it the flex item refuses to shrink below its
+   content and overflow-y:auto has nothing to scroll. */
 .tut-scroll{
   flex:1 1 auto;
   min-height:0;
@@ -883,15 +702,12 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
   scrollbar-width:thin;
   scrollbar-color:rgba(255,201,120,.35) transparent;
 }
-/* a little breathing room so the last line never sits flush
-   against the footer rule */
 .tut-scroll > *:last-child{margin-bottom:2px}
 .tut-scroll::-webkit-scrollbar{width:4px}
 .tut-scroll::-webkit-scrollbar-track{background:transparent}
 .tut-scroll::-webkit-scrollbar-thumb{
   background:rgba(255,201,120,.35);border-radius:99px;
 }
-/* footer: dots on one side, navigation on the other */
 .tut-foot{
   flex:0 0 auto;
   display:flex;align-items:center;justify-content:space-between;
@@ -937,18 +753,13 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
   margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.07);
   font-size:10.5px;color:var(--muted);line-height:1.6;
 }
+
 /* =========================================================
    TUTORIAL — SMALL AND SHORT SCREENS
-   ---------------------------------------------------------
-   Three breakpoints, because the card has three different
-   failure modes:
-
-     · narrow landscape phone  → the card eats the play area
-     · short landscape phone   → the footer falls off the bottom
-     · very short (split view) → only the scroll region survives
-
-   Each one shrinks the chrome, never the text, so the copy stays
-   readable and only the padding and the hint line give way.
+   Three breakpoints, because the card has three failure
+   modes: a narrow landscape phone (the card eats the play
+   area), a short one (the footer falls off), and a very
+   short one (only the scroll region survives).
    ========================================================= */
 @media (max-width:760px){
   #tut{
@@ -961,7 +772,6 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
   .tut-btn{width:26px;height:26px}
 }
 
-/* short landscape — the height is the scarce resource */
 @media (max-height:520px){
   #tut{
     inset-block-start:46px;
@@ -971,13 +781,12 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
   .tut-card{padding:9px 11px 8px;max-height:none}
   #tut-title{font-size:12.5px;margin-bottom:3px}
   #tut-body{font-size:11px;line-height:1.6}
-  .tut-hint{display:none}          /* the tip is the first thing to go */
+  .tut-hint{display:none}
   .tut-foot{margin-top:6px}
   .tut-btn{width:24px;height:24px}
   .tut-btn .ic{width:11px;height:11px}
 }
 
-/* very short — keep only the essentials, and let the body scroll */
 @media (max-height:380px){
   #tut{
     inset-block-start:40px;
@@ -996,10 +805,9 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
 }
 
 /* =========================================================
-   GAME OVER — its own, calmer treatment.
+   GAME OVER
    A warmer, redder sheet so it reads as a distinct moment,
-   not just another pause screen. Everything is centred and
-   the two buttons are the only things competing for attention.
+   not just another pause screen.
    ========================================================= */
 .overlay .sheet.go{
   width:min(410px,92vw);
@@ -1013,18 +821,10 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
 .overlay .sheet.go::before{
   background:linear-gradient(90deg,transparent,rgba(255,107,122,.60),transparent);
 }
-/* =========================================================
-   GAME OVER ICON
-   ---------------------------------------------------------
-   The heart was rendering squashed. Cause: `.ic` sets
-   `width:1em;height:1em`, but inside a flex/grid container the
-   SVG is a flex item and `height` can be overridden by the
-   container's line box. With a non-square computed box the
-   symbol inside stretches.
-   Fix: pin the aspect ratio explicitly, stop the icon from
-   being flexed, and force the symbol to preserve its own
-   proportions.
-   ========================================================= */
+
+/* The heart icon is pinned to a square box: without the
+   aspect-ratio and flex:0 0 auto it can be squashed by a
+   flex container's line box. */
 .go-icon{
   width:clamp(48px,7vh,58px);
   height:clamp(48px,7vh,58px);
@@ -1068,10 +868,12 @@ html[lang="en"] #tut.hazard .tut-label::after{content:' · Warning'}
 }
 .overlay .sheet.go .actions{margin-top:clamp(16px,2.6vh,22px)}
 
-/* portrait fallback: rotate the whole stage 90° so the game is always landscape.
-   `dvh` here matters more than anywhere else: the rotated stage is sized from
-   the viewport's two axes, so if the height is the stale layout height the
-   bottom edge of the rotated game slides under the URL bar. */
+/* =========================================================
+   PORTRAIT — the whole stage is rotated 90° so the game is
+   always presented in landscape. `dvh` and `dvw` are used
+   here because the rotated stage is sized from the viewport's
+   two axes.
+   ========================================================= */
 body.rotated #stage{
   position:fixed;top:0;left:0;
   width:100vh;height:100vw;
@@ -1085,11 +887,11 @@ body.rotated #stage{
 @media (max-width:900px) and (orientation:landscape){
   .menu-wrap{padding-block:14px;padding-inline:clamp(16px,3vw,36px)}
 }
+
 /* =========================================================
    SMALL SCREENS — the rotating light rays are the most
-   expensive decorative element on the menu (a conic-gradient
-   being rotated every frame). On a phone they cost more than
-   they add, so they are dimmed hard and then removed entirely.
+   expensive decorative element on the menu. On a phone they
+   cost more than they add.
    ========================================================= */
 @media (max-width:760px), (max-height:520px){
   .lamp-rays{opacity:.35}
@@ -1097,7 +899,7 @@ body.rotated #stage{
 @media (max-width:520px), (max-height:430px){
   .lamp-rays{display:none}
 }
-/* narrow / stacked layout — phones held landscape with a short width */
+
 @media (max-width:760px){
   .menu-wrap{
     grid-template-columns:1fr;
@@ -1128,7 +930,7 @@ body.rotated #stage{
 }
 
 /* very short screens: shrink the modal chrome so the buttons
-   always stay above the fold without any scrolling */
+   always stay above the fold */
 @media (max-height:560px){
   .overlay .sheet{padding:16px 18px;border-radius:18px}
   .overlay h2{font-size:18px;margin-bottom:4px}
@@ -1142,7 +944,9 @@ body.rotated #stage{
   .go-sub{font-size:11px;padding-top:8px}
 }
 
-/* respect the OS "reduce motion" setting — no animation, no spin */
+/* =========================================================
+   REDUCED MOTION
+   ========================================================= */
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{
     animation-duration:.001ms !important;

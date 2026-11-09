@@ -13,12 +13,15 @@
 <meta name="description" content="روح قنديل صغيرة تعيد النور إلى بيوت مظلمة — لعبة منصّات وألغاز بخمسة عوالم وخمس وعشرين مرحلة.">
 <title>قنديل · Qandel</title>
 
-      <!-- ── PWA ──────────────────────────────────────────────────────
-     `display:standalone` in the manifest is what removes the browser
-     chrome once the game is installed to the home screen. Everything
-     below is the plumbing that makes it installable: the manifest
-     itself, the icon set, and the Apple-specific tags (iOS ignores
-     the manifest's icons and needs its own link rel). -->
+<!-- =========================================================
+     PWA
+     `display:standalone` in the manifest is what removes the
+     browser chrome once the game is installed to the home
+     screen. Everything below is the plumbing that makes it
+     installable: the manifest itself, the icon set, and the
+     Apple-specific tags (iOS ignores the manifest's icons
+     and needs its own link rel).
+     ========================================================= -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
 <link rel="mask-icon" href="icons/maskable.svg" color="#ffd79a">
@@ -29,6 +32,13 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+
+<!-- =========================================================
+     ICON SPRITE
+     Every icon the interface uses lives here as an <symbol>,
+     referenced by `<use href="#id">`. No icon file is ever
+     requested at runtime.
+     ========================================================= -->
 <svg id="icons" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
   <defs>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.53.85l10-6.5a1 1 0 0 0 0-1.7l-10-6.5A1 1 0 0 0 8 5.5z" fill="currentColor"/></symbol>
@@ -72,10 +82,16 @@
 <div id="stage">
   <canvas id="game"></canvas>
 
+  <!-- =========================================================
+       MENU
+       Two columns on wide screens: hero on one side, actions
+       on the other. On a narrow phone the columns stack, with
+       the hero leading in both languages (logical ordering,
+       not left/right).
+       ========================================================= -->
   <section class="screen active" id="scr-menu">
     <div class="menu-wrap">
 
-      <!-- ── hero : lamp + wordmark ───────────────────────────── -->
       <div class="menu-hero">
         <div class="lamp">
           <div class="lamp-glow"></div>
@@ -86,7 +102,6 @@
         <p class="sub" data-i18n="app.subtitle">رحلة النور</p>
       </div>
 
-      <!-- ── action column ───────────────────────────────────── -->
       <div class="menu-actions">
         <div class="hero-stats" role="group" aria-label="Progress">
           <span class="hstat"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><b id="menu-stars">0</b><small data-i18n="menu.stars">نجمة</small></span>
@@ -124,6 +139,12 @@
     </div>
   </section>
 
+  <!-- =========================================================
+       LEVELS
+       The grid is built at runtime by `renderLevels()`. Each
+       tile carries its own star row, lock icon, and — when
+       open — a click handler that starts the level.
+       ========================================================= -->
   <section class="screen" id="scr-levels">
     <div class="sheet wide">
       <header class="bar">
@@ -135,6 +156,11 @@
     </div>
   </section>
 
+  <!-- =========================================================
+       SETTINGS
+       Every row is a label paired with a segmented control
+       or a single button. Options persist via `save.settings`.
+       ========================================================= -->
   <section class="screen" id="scr-settings">
     <div class="sheet">
       <header class="bar">
@@ -165,6 +191,13 @@
     </div>
   </section>
 
+  <!-- =========================================================
+       ABOUT
+       A single scrollable paragraph. The line breaks and the
+       hazard list are part of the localised string, so the
+       text stays readable in both languages without any
+       conditional markup.
+       ========================================================= -->
   <section class="screen" id="scr-credits">
     <div class="sheet">
       <header class="bar">
@@ -175,6 +208,12 @@
     </div>
   </section>
 
+  <!-- =========================================================
+       HUD
+       Left block: pause and level name. Right block: hearts,
+       gems, time, oil. Both blocks are pointer-transparent
+       except for their own controls.
+       ========================================================= -->
   <div id="hud" hidden>
     <div class="hud-left">
       <button class="icon" id="btn-pause"><svg class="ic"><use href="#i-pause"/></svg></button>
@@ -188,6 +227,9 @@
     </div>
   </div>
 
+  <!-- =========================================================
+       PAUSE OVERLAY
+       ========================================================= -->
   <div class="overlay" id="ov-pause" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pause-title">
       <h2 id="pause-title" data-i18n="pause.title">توقف مؤقت</h2>
@@ -199,6 +241,12 @@
     </div>
   </div>
 
+  <!-- =========================================================
+       GAME OVER OVERLAY
+       The flavour line is picked from eight variants by
+       `showGameOver()`, so the message never repeats back
+       to back.
+       ========================================================= -->
   <div class="overlay" id="ov-gameover" hidden>
     <div class="sheet go" role="alertdialog" aria-modal="true" aria-labelledby="go-title" aria-describedby="go-line">
       <div class="go-icon"><svg class="ic" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet"><use href="#i-heart"/></svg></div>
@@ -212,6 +260,13 @@
     </div>
   </div>
 
+  <!-- =========================================================
+       RESULT OVERLAY
+       The next-level button carries a `data-mode` attribute
+       that `showResult()` sets to `next` or `retry`, so the
+       same button can either advance or replay a level
+       depending on whether the pass mark was met.
+       ========================================================= -->
   <div class="overlay" id="ov-result" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="res-title">
       <h2 id="res-title">أحسنت</h2>
@@ -231,6 +286,13 @@
     </div>
   </div>
 
+  <!-- =========================================================
+       TUTORIAL CARD
+       Shared by the controls sequence and the contextual
+       hazard cards. The two states differ by the `hazard`
+       class on the root, which hides the sequence chrome and
+       changes the surface to a warning tone.
+       ========================================================= -->
   <div id="tut" role="status" aria-live="polite" aria-atomic="true" hidden>
     <div class="tut-card">
       <div class="tut-top">
@@ -238,9 +300,6 @@
         <button class="tut-skip" id="tut-skip" data-i18n="tut.skip">تخطّي</button>
       </div>
 
-      <!-- the scrollable body: on a short screen the text is taller
-           than the card, so it must be able to scroll instead of
-           spilling out of the rounded box -->
       <div class="tut-scroll" id="tut-scroll">
         <h3 id="tut-title"></h3>
         <p id="tut-body"></p>
@@ -249,10 +308,10 @@
       <div class="tut-foot">
         <div class="tut-dots" id="tut-dots"></div>
         <div class="tut-nav">
-          <button class="tut-btn" id="tut-prev" aria-label="السابق">
+          <button class="tut-btn" id="tut-prev" aria-label="السابق" data-i18n-aria="tut.prev">
             <svg class="ic"><use href="#i-arrow-r"/></svg>
           </button>
-          <button class="tut-btn" id="tut-next" aria-label="التالي">
+          <button class="tut-btn" id="tut-next" aria-label="التالي" data-i18n-aria="tut.next">
             <svg class="ic"><use href="#i-arrow-l"/></svg>
           </button>
         </div>
@@ -262,16 +321,30 @@
     </div>
   </div>
 
+  <!-- =========================================================
+       TOUCH PADS
+       Physically left = move, right = jump, in both
+       languages. The `aria-label`s come from `data-i18n-aria`
+       so a screen reader announces them in the active
+       language.
+       ========================================================= -->
   <div id="touch" hidden>
     <div class="tpad pad-move">
-      <button class="tbtn" id="t-left" aria-label="يسار"><svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg></button>
-      <button class="tbtn" id="t-right" aria-label="يمين"><svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg></button>
+      <button class="tbtn" id="t-left" aria-label="يسار" data-i18n-aria="touch.left">
+        <svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-l"/></svg>
+      </button>
+      <button class="tbtn" id="t-right" aria-label="يمين" data-i18n-aria="touch.right">
+        <svg class="ic" viewBox="0 0 24 24"><use href="#i-arrow-r"/></svg>
+      </button>
     </div>
     <div class="tpad pad-jump">
-      <button class="tbtn jump" id="t-jump"><svg class="ic"><use href="#i-arrow-up"/></svg></button>
+      <button class="tbtn jump" id="t-jump" aria-label="قفز" data-i18n-aria="touch.jump">
+        <svg class="ic"><use href="#i-arrow-up"/></svg>
+      </button>
     </div>
   </div>
 </div>
+
 <script src="i18n.js"></script>
 <script src="levels.js"></script>
 <script src="game.js"></script>

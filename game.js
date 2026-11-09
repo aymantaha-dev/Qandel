@@ -1367,11 +1367,13 @@ function win(){
      ========================================================= */
   const passMark = stars >= 2;
   if(passMark && S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
-  S.result.passMark = passMark;
-  S.result.passStars = 2;
 
+  /* S.result must be BUILT here, before anything reads it — the two
+     assignment lines that used to sit above this block wrote into
+     `null` and threw a TypeError before the result screen could ever
+     be reached. The pass mark is set on the object as it is created. */
   S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio,
-            passMark:false, passStars:2};
+            passMark:passMark, passStars:PASS_STARS};
   setTimeout(()=>{ showResult(); }, 620);
 }
 
@@ -4285,6 +4287,7 @@ const TUT = {
     }
     this.titleEl = qs('#tut-title');
     this.bodyEl  = qs('#tut-body');
+    this.labelEl = this.root.querySelector('.tut-label');
     this.dotsEl  = qs('#tut-dots');
     this.hintEl  = qs('#tut-hint');
     this.scrollEl= qs('#tut-scroll');
@@ -4392,13 +4395,7 @@ const TUT = {
     if(!this.active) return;
     const s = this.steps[this.step];
     if(s && s.done()) this.advance();
-  },/*
-[/OLD]
-
-    if(!this.active) return;
-    const s = this.steps[this.step];
-    if(s && s.done()) this.advance();
-  },*/
+  },
 
   /* =========================================================
      HAZARD CARD DRIVER
@@ -4425,38 +4422,29 @@ const TUT = {
   updateHazardCards(dt){
     dt = (dt === undefined) ? 1/60 : dt;
 
-    /* 1 · the card on screen */
     if(this.hazardCard){
       this.hazardTimer -= dt;
       if(this.hazardTimer <= 0) hideHazardCard();
       return;
     }
 
-    /* 2 · never talk over the controls tutorial *//*
-[/OLD]
-[NEW]
-
-    /* 2 · never talk over the controls tutorial */
     if(this.active) return;
     if(!cur || S.finished || S.paused) return;
 
-    /* 3 · scan for a family the player has not met yet */
     for(let i=0;i<this.hazardDefs.length;i++){
       const def = this.hazardDefs[i];
       if(this.hazardSeen[def.key]) continue;
       if(!def.probe()) continue;
 
-      /* mark it seen immediately so it can never queue twice */
       this.hazardSeen[def.key] = true;
       save.tutorialSeen = save.tutorialSeen || {};
       save.tutorialSeen[def.key] = 1;
       persist();
 
       this.hazardQueue.push(def.key);
-      break;                       /* one per frame — no stampede */
+      break;
     }
 
-    /* 4 · show the next one after a beat */
     if(this.hazardQueue.length){
       this.hazardDelay = (this.hazardDelay || 0) + dt;
       if(this.hazardDelay >= 0.9){
@@ -4522,6 +4510,10 @@ function showHazardCard(key){
   TUT.titleEl.textContent = t('tut.'+key+'.title');
   TUT.bodyEl.textContent  = t('tut.'+key+'.body');
   if(TUT.hintEl) TUT.hintEl.textContent = '';
+
+  /* the "· Warning" suffix on the label is translated text, not CSS:
+     the stylesheet reads it from this attribute (see styles.css) */
+  if(TUT.labelEl) TUT.labelEl.setAttribute('data-suffix', t('tut.warning'));
 
   /* the sequence chrome does not belong on a hazard card */
   if(TUT.dotsEl) TUT.dotsEl.innerHTML = '';
@@ -5130,7 +5122,7 @@ qs('#btn-tutorial').addEventListener('click', function(){
   const span = btn.querySelector('span');
   const old = span ? span.textContent : t('settings.tutorialBtn');
   btn.innerHTML = '<svg class="ic"><use href="#i-check"/></svg><span></span>';
-  btn.querySelector('span').textContent = (LANG==='ar') ? 'تم' : 'Done';
+  btn.querySelector('span').textContent = t('settings.done');
   setTimeout(function(){
     btn.innerHTML = '<svg class="ic"><use href="#i-info"/></svg><span></span>';
     btn.querySelector('span').textContent = old;
@@ -5148,7 +5140,7 @@ qs('#btn-reset').addEventListener('click', function(){
   save.levels={}; save.unlocked={0:1}; save.maxUnlocked=0;
   persist(); renderLevels();
   btn.innerHTML='<svg class="ic"><use href="#i-check"/></svg><span></span>';
-  btn.querySelector('span').textContent = (LANG==='ar')?'تم':'Done';
+  btn.querySelector('span').textContent = t('settings.done');
   setTimeout(function(){
     btn.innerHTML='<svg class="ic"><use href="#i-trash"/></svg><span></span>';
     btn.querySelector('span').textContent = old;
