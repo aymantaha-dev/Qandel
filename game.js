@@ -18,6 +18,35 @@ let DPR = 1;
 let VW = 960, VH = 540;
 let VIEW_W = 960, VIEW_H = 540, SCALE = 1;
 
+/* =========================================================
+   PERFORMANCE GUARD
+   ---------------------------------------------------------
+   The post stack (bloom, grain, grade) is what makes the frame
+   look expensive — and it is also, by a wide margin, the most
+   expensive thing in the renderer: several full-screen composites
+   and one full read of the canvas, every single frame.
+
+   On a fast desktop that is free. On a phone it is the difference
+   between 60fps and 40. So the game now MEASURES itself: if the
+   average frame time passes 23ms, the post stack switches off for
+   the rest of the session and the game goes back to plain, clean,
+   smooth rendering. It is one-way on purpose — a stack that flips
+   on and off every few seconds is worse than either state.
+   ========================================================= */
+const PERF = { off:false, acc:0, n:0 };
+function perfTick(dt){
+  if(PERF.off) return;
+  PERF.acc += dt; PERF.n++;
+  if(PERF.n < 45) return;
+  const avg = PERF.acc / PERF.n;
+  PERF.acc = 0; PERF.n = 0;
+  if(avg > 0.023){
+    PERF.off = true;
+    console.log('[qandil] post-processing disabled — avg frame ' +
+                Math.round(avg * 1000) + 'ms');
+  }
+}
+
 /* ---------------- utils ---------------- */
 const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
 const lerp=(a,b,t)=>a+(b-a)*t;
@@ -565,7 +594,7 @@ function loadLevel(i){
   cur={ L:L, W:W, plats:[], movers:[], ceils:[], crumbs:[], gems:[], oils:[],
         spikes:[], fires:[], lavas:[], checkpoints:[], goal:null,
         /* ---- new hazard families ---- */
-        saws:[], nails:[], risers:[], crushers:[] };
+        saws:[], nails:[], crushers:[] };
 
   (L.plats||[]).forEach(p=>cur.plats.push({x:p[0],y:p[1],w:p[2],h:p[3]}));
   (L.ceils||[]).forEach(p=>cur.ceils.push({x:p[0],y:p[1],w:p[2],h:p[3]}));
@@ -607,22 +636,6 @@ function loadLevel(i){
     x:n[0], y:n[1], w:n[2], h:n[3], dir:n[4] === -1 ? -1 : 1
   }));
 
-  /* =========================================================
-     RISERS — a stone that erupts out of the floor.
-     Authored at its RAISED position. It starts buried (`rise`
-     at 0 = fully sunk) and animates up when the player is near,
-     then crumbles `fuse` seconds after being stood on.
-
-     risers: [x, y, w, h, fuse, respawn]
-     ========================================================= */
-  (L.risers||[]).forEach(r=>cur.risers.push({
-    x:r[0], y:r[1], w:r[2], h:r[3],
-    fuse: r[4] || 0.6,
-    respawn: r[5] === 1,
-    rise: 0,            /* 0 = buried, 1 = fully up   */
-    state:'idle',       /* idle | up | dying | gone   */
-    timer:0, shake:0, cool:0
-  }));
 
   /* =========================================================
      CRUSHERS — a stone that drops from the ceiling.
@@ -660,14 +673,14 @@ function loadLevel(i){
   (L.checkpoints||[]).forEach(c=>{
     const cx=c[0];
     /* find the highest solid top at or just below the authored y */
-    let bestY=null, bestD=1e9;
+    let bestY=null, bestD=1e9, bestP=null;
     const all=(L.plats||[]).concat(L.ceils||[]);
     for(let k=0;k<all.length;k++){
       const p=all[k];
       if(cx < p[0]+4 || cx > p[0]+p[2]-4) continue;
       if(p[1] < c[1]-60) continue;             /* must be at/below the flag */
       const d=Math.abs(p[1]-c[1]);
-      if(d<bestD){ bestD=d; bestY=p[1]; }
+      if(d<bestD){ bestD=d; bestY=p[1]; bestP=p; }
     }
     if(bestY===null) return;                   /* no floor → skip it */
     /* never anchor to a fragile platform */
@@ -675,8 +688,16 @@ function loadLevel(i){
       const cr=cur.crumbs[k];
       if(cx>=cr.x-16 && cx<=cr.x+cr.w+16 && Math.abs(cr.y-bestY)<18) return;
     }
-    /* sit 30px above the platform surface — the flag pole is 14px tall */
-    cur.checkpoints.push({x:cx, y:bestY-30, reached:false, ph:lrnd()*6});
+    /* the MARKER sits 30px above the surface (that is the pole), but the
+       RESPAWN must not: it needs the surface itself, plus the extent of
+       the stone, so the player can be put back with their feet on it and
+       their whole body inside it — see respawnPoint(). */
+    cur.checkpoints.push({
+      x:cx, y:bestY-30, reached:false, ph:lrnd()*6,
+      gx: bestP ? bestP[0] : cx - 40,
+      gw: bestP ? bestP[2] : P.w + 80,
+      gy: bestY
+    });
   });
   (L.movers||[]).forEach(m=>cur.movers.push({
     baseX:m.x,baseY:m.y,x:m.x,y:m.y,w:m.w,h:m.h,
@@ -737,44 +758,62 @@ function solids(){
       if(cur.crumbs[i].alive) arr.push(cur.crumbs[i]);
     }
   }
-  /* =========================================================
-     RISERS — solid as soon as the stone is standing.
-     ---------------------------------------------------------
-     THE BUG THIS FIXES
-     ------------------
-     The old rule was `state==='up' && rise > 0.55`. That meant a
-     stone which had finished climbing but was still settling, or
-     one that had been nudged back below 0.55 by the idle sink,
-     was NOT solid — so the player landed on it and fell straight
-     through. From the player's side that is "the rock you cannot
-     stand on", and it is indefensible: a stone that is visibly
-     there must hold you.
 
-     A riser is now solid whenever it is up OR when it is still
-     climbing past the point where its top is within reach
-     (rise > 0.35). It stops being solid the moment it starts to
-     give way, which is the only moment that matters.
-     ========================================================= */
-  if(cur.risers){
-    for(let i=0;i<cur.risers.length;i++){
-      const r=cur.risers[i];
-      if(!r) continue;
-      if(r.state==='gone' || r.state==='dying') continue;
-      if(r.rise > 0.35) arr.push(r);
-    }
-  }
   return arr;
 }
 
-/* where the player reappears after losing a heart:
-   the last checkpoint reached, otherwise the level spawn */
+/* =========================================================
+   WHERE THE PLAYER REAPPEARS — on SOLID GROUND, feet first.
+   ---------------------------------------------------------
+   THE "I LOST A HEART FOR NO REASON" BUG
+   --------------------------------------
+   `respawnPoint()` used to hand back the checkpoint object
+   verbatim: `{x: poleX, y: surfaceTop - 30}`.
+
+   Two things were wrong with that number, and both of them put
+   the spirit in the void:
+
+     · 30 is the POLE's height, not the player's. The player is 34
+       tall, so `y = surfaceTop - 30` drops the feet 4 units
+       INSIDE the platform on the first physics frame.
+
+     · `poleX` is the tip of the pole, but the player is 26 wide
+       and is placed with `x = poleX` — the whole body ends up to
+       the RIGHT of the pole. A checkpoint standing near the end of
+       a short platform therefore respawned the player with most of
+       their body over the edge, and they slid off.
+
+   Falling is not a hazard, so the 1.4s respawn grace never
+   applied to it: the player simply vanished off the bottom of the
+   screen and lost another heart 1.4 seconds later, with nothing on
+   screen to explain why.
+
+   The checkpoint now carries the platform it hangs from (gx, gw,
+   gy), so the respawn can land the FEET on that surface and keep
+   the whole body inside the stone — clamped, never guessed.
+   ========================================================= */
 function respawnPoint(){
-  if(S.cp >= 0 && cur.checkpoints[S.cp]) return cur.checkpoints[S.cp];
+  const cp = (S.cp >= 0 && cur.checkpoints[S.cp]) ? cur.checkpoints[S.cp] : null;
+
+  if(cp && cp.gy !== undefined){
+    const minX = cp.gx + 2;
+    const maxX = cp.gx + cp.gw - P.w - 2;
+    const rx = (maxX < minX)
+      ? (cp.gx + cp.gw/2 - P.w/2)      /* platform narrower than the player */
+      : clamp(cp.x, minX, maxX);
+    return { x: rx, y: cp.gy - P.h };  /* feet exactly on the surface */
+  }
+
+  /* a checkpoint from an older shape — placeAt settles it */
+  if(cp) return cp;
+
   return { x:cur.L.spawn[0], y:cur.L.spawn[1] };
 }
 
 function placeAt(pt){
   P.x=pt.x; P.y=pt.y; P.vx=0; P.vy=0;
+  trailPts.length = 0;          /* no streak across the level on a teleport */
+  lampLagX = 0; lampLagY = 0;
   P.onGround=false; P.coyote=0; P.buffer=0; P.squash=1;
   P.jumps=MAX_JUMPS; P.spin=0;
   S.invuln=1.4;                 /* brief grace so you don't chain-die */
@@ -962,8 +1001,19 @@ function update(dt){
   /* invulnerability timer after a respawn */
   if(S.invuln>0) S.invuln = Math.max(0, S.invuln-dt);
 
-  /* fall out */
-  if(P.y > VIEW_H+140){ loseHeart(); return; }
+  /* =========================================================
+     FALLING OUT IS NEVER FORGIVEN BY THE RESPAWN GRACE
+     ---------------------------------------------------------
+     `loseHeart()` bails out while `S.invuln > 0`, and falling is
+     not a hazard — it does not respect grace. So a bad respawn
+     dropped the player into the void while invulnerable and
+     nothing happened for the full 1.4s: the spirit just left the
+     bottom of the screen and then, the instant the grace expired,
+     a heart went. That is the second death with no visible cause.
+     Clearing the grace here means a fall is answered immediately,
+     and the respawn fix above means it cannot happen at all.
+     ========================================================= */
+  if(P.y > VIEW_H+140){ S.invuln = 0; loseHeart(); return; }
 
   /* =========================================================
      PLAYER HITBOX — declared ONCE, at the top of the hazard pass.
@@ -988,7 +1038,6 @@ function update(dt){
   if(!cur.crumbs) cur.crumbs=[];
   if(!cur.saws)   cur.saws=[];
   if(!cur.nails)  cur.nails=[];
-  if(!cur.risers) cur.risers=[];
   if(!cur.crushers) cur.crushers=[];
 
   /* spikes */
@@ -1131,74 +1180,6 @@ function update(dt){
     if(hit(pb, nl)){ loseHeart(); return; }
   }
 
-  /* =========================================================
-     RISERS — the stone that erupts out of the floor.
-     ---------------------------------------------------------
-     Three states, in order:
-
-       idle  → the stone is buried; it rises when the player is
-               close enough to be committed to the crossing
-       up    → solid; the fuse starts the moment you stand on it
-       dying → it has given way; it sinks and disappears
-
-     `respawn` decides whether it comes back, and the cooldown is
-     longer than the fuse so it never reappears under a player.
-     ========================================================= */
-  for(let i=0;i<cur.risers.length;i++){
-    const r=cur.risers[i];
-    if(!r) continue;
-    const rcx = r.x + r.w/2;
-
-    /* ---- idle / returning: watch for the player ---- */
-    if(r.state === 'idle'){
-      r.rise = Math.max(0, r.rise - dt * 3.2);   /* sink back if left alone */
-      const near = Math.abs(pcx0() - rcx) < 150;
-      if(near){
-        r.rise = Math.min(1, r.rise + dt * 3.4);
-        if(r.rise >= 1){ r.state = 'up'; AU.tone(240,.09,'sine',.05); }
-      }
-      continue;
-    }
-
-    if(r.state === 'gone'){
-      if(r.respawn){
-        r.cool -= dt;
-        if(r.cool <= 0){
-          r.state='idle'; r.timer=0; r.shake=0; r.rise=0;
-        }
-      }
-      continue;
-    }
-
-    if(r.state === 'dying'){
-      r.rise = Math.max(0, r.rise - dt * 4.0);
-      r.shake = Math.max(0, r.shake - dt*10);
-      if(r.rise <= 0){
-        r.state = 'gone';
-        r.cool = 2.8;
-        burst(rcx, r.y + r.h/2, cur.W.platTop, 12);
-      }
-      continue;
-    }
-
-    /* ---- up: the fuse only runs while the player stands on it ---- */
-    const standing = P.onGround && P.y+P.h >= r.y-4 && P.y+P.h <= r.y+8 &&
-                     P.x+P.w > r.x && P.x < r.x+r.w;
-    if(standing){
-      if(r.timer === 0){
-        r.timer = r.fuse || 0.6;
-        AU.tone(190,.10,'square',.05);
-      }
-      r.timer -= dt;
-      r.shake = Math.min(3, r.shake + dt*14);
-      if(r.timer <= 0){
-        r.state='dying'; r.timer=0;
-        AU.tone(120,.24,'sawtooth',.07,50);
-      }
-    } else {
-      r.shake = Math.max(0, r.shake - dt*10);
-    }
-  }
 
   /* =========================================================
      CRUSHERS — the stone that drops from the ceiling.
@@ -1289,8 +1270,19 @@ function update(dt){
     win();
   }
 
-  /* camera — keeps the player at ~42% of the screen so you always see ahead */
-  const target = clamp(P.x+P.w/2 - VIEW_W*0.42, 0, Math.max(0, cur.L.wd-VIEW_W));
+  /* =========================================================
+     CAMERA — LOOK-AHEAD
+     ---------------------------------------------------------
+     The player sat at a fixed 42% of the screen, so running right
+     gave exactly the same visibility ahead as standing still. The
+     camera now LEADS the direction of travel by up to ~110 world
+     units, which is a little over a third of a jump — enough to
+     show you the landing before you have to commit to it, and
+     small enough that the level never feels like it is sliding.
+     ========================================================= */
+  const lookAhead = clamp(P.vx * 0.34, -110, 110);
+  const target = clamp(P.x+P.w/2 - VIEW_W*0.42 + lookAhead,
+                       0, Math.max(0, cur.L.wd-VIEW_W));
   S.cam = lerp(S.cam, target, 1-Math.pow(0.0008,dt));
 
   /* particles */
@@ -1303,6 +1295,15 @@ function update(dt){
     p.x += p.vx*dt; p.y += p.vy*dt;
   }
   S.shake = Math.max(0, S.shake - dt*46);
+
+  /* ---- the lantern spring ----
+     a light object on a short cord cannot follow a running body
+     instantly: it trails when you accelerate and floats up when you
+     fall. This is the cheapest possible way to say "it has mass". */
+  const lagTX = clamp(-P.vx * 0.016, -5, 5);
+  const lagTY = clamp( P.vy * 0.010, -5, 6);
+  lampLagX += (lagTX - lampLagX) * Math.min(1, dt * 12);
+  lampLagY += (lagTY - lampLagY) * Math.min(1, dt * 12);
 }
 
 function win(){
@@ -1830,6 +1831,41 @@ function drawMidLayer(W,par){
 }
 
 /* =========================================================
+   PALETTE ACCESS — one ramp, one fallback, no exceptions.
+   ========================================================= */
+const PAL_FALLBACK = {
+  stone : ['#8a5428','#54301a','#1c0d05'],
+  rim   : '#ffd7a0', shadow:'#120901', haze:'#1c0c04',
+  spike : ['#3a1512','#a4614a','#fff0d8'],
+  steel : ['#1d2129','#4a4f5c','#b9bfcc']
+};
+function PAL(W){
+  const p = W && W.pal;
+  return (p && p.stone) ? p : PAL_FALLBACK;
+}
+
+/* =========================================================
+   ATMOSPHERIC HAZE
+   ---------------------------------------------------------
+   The three parallax bands were drawn at three different scales
+   but at exactly the same saturation and contrast, so they read
+   as one flat poster instead of distance. Real air does one
+   thing: it pushes everything far away towards the sky colour.
+
+   One translucent fill of the world's own haze between the bands
+   is enough to separate them — and because it uses the palette,
+   each world gets its own air.
+   ========================================================= */
+function drawHaze(W, a){
+  const p = PAL(W);
+  ctx.save();
+  ctx.globalAlpha = (a === undefined) ? 0.24 : a;
+  ctx.fillStyle = p.haze;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+}
+
+/* =========================================================
    PLATFORM RENDERING — one distinct material per world.
    clay   : rounded mud-brick with a rough straw top
    mosque : polished marble with a gold inlay line
@@ -1864,14 +1900,21 @@ function drawPlatBody(p, W, heat){
 
   ctx.save();
 
-  /* drop shadow — shared by every style */
-  ctx.fillStyle='rgba(0,0,0,.42)';
-  rr(ctx,p.x+3,p.y+6,p.w,p.h,r); ctx.fill();
+  const pal = PAL(W);
+
+  /* drop shadow — the WORLD's shadow colour, not a universal black:
+     pure black under every stone is what flattened five worlds into one */
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = pal.shadow;
+  rr(ctx,p.x+3,p.y+7,p.w,p.h,r); ctx.fill();
+  ctx.restore();
 
   const g=ctx.createLinearGradient(0,p.y,0,p.y+p.h);
   /* heat warms the top of the block without changing its shape */
-  g.addColorStop(0, h > 0 ? '#c9905e' : W.platTop);
-  g.addColorStop(1, W.platBot);
+  g.addColorStop(0,    h > 0 ? '#c9905e' : pal.stone[0]);
+  g.addColorStop(0.55, pal.stone[1]);
+  g.addColorStop(1,    pal.stone[2]);
 
   if(style==='clay'){
     /* rounded, hand-made mud brick */
@@ -1910,6 +1953,7 @@ function drawPlatBody(p, W, heat){
       ctx.restore();
     }
 
+  } else if(style==='mosque'){
     /* polished marble slab */
     rr(ctx,p.x,p.y,p.w,p.h,r);
     ctx.fillStyle=g; ctx.fill();
@@ -1983,6 +2027,35 @@ function drawPlatBody(p, W, heat){
     rr(ctx,p.x+4,p.y+p.h-4,p.w-8,2,1); ctx.fill();
     ctx.restore();
   }
+
+  /* =========================================================
+     DIRECTIONAL RIM LIGHT
+     ---------------------------------------------------------
+     Every stone in the game is lit from the same corner. One
+     clipped band along the top edge, in the world's own rim
+     colour, is what makes a flat vertical gradient read as a
+     solid object with a light source above it.
+
+     It is clipped to the block, so it can never escape the
+     silhouette — the same rule the straw and the cracks follow.
+     ========================================================= */
+  ctx.save();
+  rr(ctx,p.x,p.y,p.w,p.h,r); ctx.clip();
+  const rimBand = Math.min(p.h - 1, 6);
+  const rimG = ctx.createLinearGradient(p.x, p.y, p.x + Math.min(p.w, 110), p.y + rimBand);
+  rimG.addColorStop(0, pal.rim);
+  rimG.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = 0.26 + h * 0.22;
+  ctx.fillStyle = rimG;
+  ctx.fillRect(p.x, p.y, p.w, rimBand);
+  /* a soft contact shadow along the underside, inside the silhouette */
+  const aoG = ctx.createLinearGradient(0, p.y + p.h - 8, 0, p.y + p.h);
+  aoG.addColorStop(0, 'rgba(0,0,0,0)');
+  aoG.addColorStop(1, pal.shadow);
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = aoG;
+  ctx.fillRect(p.x, p.y + p.h - 8, p.w, 8);
+  ctx.restore();
 
   ctx.restore();
 }
@@ -2469,8 +2542,11 @@ function drawEmbers(f, cx, baseY, flick){
    paint rather than molten rock.
    ========================================================= */
 function drawLava(l,W){
+  const pal = PAL(W);
   const surfaceY = l.y;
-  const n = Math.max(2, Math.round(l.w / 34));
+  /* a wide pool needs more bubbles and more crust, or the stretch
+     between them reads as a flat coloured band */
+  const n = Math.max(3, Math.round(l.w / 26));
 
   /* =========================================================
      THE PIT
@@ -2490,13 +2566,15 @@ function drawLava(l,W){
   /* the pool runs hundreds of units down (it must have no floor to land
      on), but the rock around it only needs drawing as far as the bottom
      of the screen — anything deeper is pure wasted fill */
-  const deep = Math.min(bot + 26, gy + 150);
+  /* the pit has to run off the bottom of the screen. A pool whose
+     walls stop at a visible line reads as a box, not as a hole. */
+  const deep = Math.max(bot + 40, VIEW_H + 180);
 
   ctx.save();
-  const rock = ctx.createLinearGradient(0, gy, 0, deep);
-  rock.addColorStop(0,   '#2b1710');
-  rock.addColorStop(0.30,'#180b06');
-  rock.addColorStop(1,   '#070302');
+  const rock = ctx.createLinearGradient(0, gy - 2, 0, gy + 220);
+  rock.addColorStop(0,    pal.stone[1]);
+  rock.addColorStop(0.28, pal.shadow);
+  rock.addColorStop(1,    '#040101');
   ctx.fillStyle = rock;
   /* left wall — hangs from the ground line, same height as the pit */
   rr(ctx, bx, gy - 2, rim + 2, deep - gy + 2, 3); ctx.fill();
@@ -2515,13 +2593,25 @@ function drawLava(l,W){
 
   /* ---------- 2 · the molten body, sitting in the pit ---------- */
   ctx.save();
-  const body = ctx.createLinearGradient(0, l.y, 0, l.y + l.h);
-  body.addColorStop(0,   '#ffb347');
-  body.addColorStop(0.18,'#ff7a1a');
-  body.addColorStop(0.5, '#c9300c');
-  body.addColorStop(1,   '#3d0702');
+  /* =========================================================
+     THE MOLTEN BODY FILLS THE WHOLE MOUTH
+     ---------------------------------------------------------
+     It was drawn at exactly `l.h` — 320 units — while the screen
+     only shows down to 540, so most of the pool was painted where
+     nobody can see it and the visible part was a thin strip with a
+     black rectangle under it. The body now runs past the bottom of
+     the viewport, and the colour ramp is front-loaded with heat so
+     the surface stays the brightest part of the liquid.
+     ========================================================= */
+  const bodyH = Math.max(l.h, deep - l.y);
+  const body = ctx.createLinearGradient(0, l.y, 0, l.y + bodyH);
+  body.addColorStop(0,    '#ffe0a8');
+  body.addColorStop(0.05, '#ffb347');
+  body.addColorStop(0.16, '#ff7a1a');
+  body.addColorStop(0.45, '#c9300c');
+  body.addColorStop(1,    '#2a0502');
   ctx.fillStyle = body;
-  rr(ctx, l.x, l.y, l.w, l.h, 4);
+  rr(ctx, l.x, l.y, l.w, bodyH, 4);
   ctx.fill();
 
   /* a slow-moving crust pattern so the surface is never flat */
@@ -2540,6 +2630,36 @@ function drawLava(l,W){
   /* ---------- 2 · additive heat on the surface ---------- */
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
+
+  /* ---- the mouth's own glow, wide enough to reach the banks ----
+     the pool is a light source now, not an orange shape */
+  const mouthR = Math.max(190, l.w * 0.80);
+  const mouth = ctx.createRadialGradient(
+      l.x + l.w/2, l.y, 0, l.x + l.w/2, l.y, mouthR);
+  mouth.addColorStop(0,    'rgba(255,160,60,0.34)');
+  mouth.addColorStop(0.35, 'rgba(255,110,35,0.14)');
+  mouth.addColorStop(1,    'rgba(255,80,25,0)');
+  ctx.fillStyle = mouth;
+  ctx.beginPath();
+  ctx.ellipse(l.x + l.w/2, l.y, mouthR, mouthR * 0.55, 0, 0, 6.2832);
+  ctx.fill();
+
+  /* ---- the meniscus: a white-hot line across the WHOLE surface ----
+     The hottest part of a liquid is its surface, never its middle.
+     This one line is what separates "molten" from "orange". */
+  const men = ctx.createLinearGradient(0, l.y - 2, 0, l.y + 9);
+  men.addColorStop(0, 'rgba(255,253,238,0.95)');
+  men.addColorStop(1, 'rgba(255,170,60,0)');
+  ctx.fillStyle = men;
+  ctx.fillRect(l.x, l.y - 2, l.w, 11);
+
+  /* ---- heat rising out of the entire mouth ---- */
+  const rise = ctx.createLinearGradient(0, l.y, 0, l.y - 170);
+  rise.addColorStop(0,    'rgba(255,150,50,0.26)');
+  rise.addColorStop(0.40, 'rgba(255,110,35,0.10)');
+  rise.addColorStop(1,    'rgba(255,90,30,0)');
+  ctx.fillStyle = rise;
+  ctx.fillRect(l.x, l.y - 170, l.w, 170);
 
   /* a bright band right at the surface */
   const surf = ctx.createLinearGradient(0, surfaceY - 2, 0, surfaceY + 16);
@@ -2590,6 +2710,7 @@ function drawLava(l,W){
    like sharpened metal instead of a coloured shape.
    ========================================================= */
 function drawSpikes(s,W){
+  const pal = PAL(W);
   const n = Math.max(1, Math.round(s.w / 18));
   const step = s.w / n;
   const baseY = s.y + s.h;
@@ -2611,7 +2732,7 @@ function drawSpikes(s,W){
     const tipY = s.y;
 
     /* 1 · dark body — the full triangle, in shadow */
-    ctx.fillStyle = '#3a1512';
+    ctx.fillStyle = pal.spike[0];
     ctx.beginPath();
     ctx.moveTo(x0, baseY);
     ctx.lineTo(midX, tipY);
@@ -2621,9 +2742,9 @@ function drawSpikes(s,W){
 
     /* 2 · lit left face — the bevel that sells the sharpness */
     const face = ctx.createLinearGradient(midX, tipY, x0, baseY);
-    face.addColorStop(0,   '#fff0d8');
-    face.addColorStop(0.55,'#e0a882');
-    face.addColorStop(1,   '#8a4436');
+    face.addColorStop(0,   pal.spike[2]);
+    face.addColorStop(0.55, pal.spike[1]);
+    face.addColorStop(1,   pal.spike[0]);
     ctx.fillStyle = face;
     ctx.beginPath();
     ctx.moveTo(x0 + step * 0.06, baseY);
@@ -2666,6 +2787,7 @@ function drawSpikes(s,W){
    which is both cheap and genuinely serrated.
    ========================================================= */
 function drawSaw(s,W){
+  const pal = PAL(W);
   const cx = s.x, cy = s.y, r = s.r;
 
   /* ---- 1 · hazard glow ---- */
@@ -2685,9 +2807,9 @@ function drawSaw(s,W){
 
   /* ---- 2 · dark disc body ---- */
   const body = ctx.createRadialGradient(0,-r*0.3,0,0,0,r);
-  body.addColorStop(0,   '#8a8f9c');
-  body.addColorStop(0.55,'#4a4f5c');
-  body.addColorStop(1,   '#1d2129');
+  body.addColorStop(0,   pal.steel[2]);
+  body.addColorStop(0.55, pal.steel[1]);
+  body.addColorStop(1,   pal.steel[0]);
   ctx.fillStyle = body;
   ctx.beginPath(); ctx.arc(0,0,r*0.82,0,6.2832); ctx.fill();
 
@@ -2704,9 +2826,9 @@ function drawSaw(s,W){
   }
   ctx.closePath();
   const tg = ctx.createLinearGradient(-r,0,r,0);
-  tg.addColorStop(0,   '#b9bfcc');
-  tg.addColorStop(0.5, '#6e7482');
-  tg.addColorStop(1,   '#2b303a');
+  tg.addColorStop(0,   pal.steel[2]);
+  tg.addColorStop(0.5, pal.steel[1]);
+  tg.addColorStop(1,   pal.steel[0]);
   ctx.fillStyle = tg;
   ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,.55)';
@@ -2733,6 +2855,7 @@ function drawSaw(s,W){
    mistakes one hazard for the other.
    ========================================================= */
 function drawNails(n,W){
+  const pal = PAL(W);
   const dir = n.dir;
   const n_count = Math.max(1, Math.round(n.w / 13));
   const step = n.w / n_count;
@@ -2741,7 +2864,8 @@ function drawNails(n,W){
 
   /* the base rail the nails are set into */
   const railY = dir === 1 ? n.y + n.h : n.y;
-  ctx.fillStyle = 'rgba(40,44,52,.95)';
+  ctx.fillStyle = pal.steel[0];
+  ctx.globalAlpha = 0.95;
   rr(ctx, n.x, railY - (dir===1?4:0), n.w, 4, 1.5);
   ctx.fill();
 
@@ -2752,7 +2876,8 @@ function drawNails(n,W){
     const baseY = dir === 1 ? n.y + n.h : n.y;
 
     /* dark body */
-    ctx.fillStyle = '#2a2e36';
+    ctx.fillStyle = pal.steel[0];
+    ctx.globalAlpha = 1;
     ctx.beginPath();
     ctx.moveTo(x0 + step*0.18, baseY);
     ctx.lineTo(midX, tipY);
@@ -2762,9 +2887,9 @@ function drawNails(n,W){
 
     /* lit face */
     const face = ctx.createLinearGradient(midX, tipY, x0, baseY);
-    face.addColorStop(0,   '#ffffff');
-    face.addColorStop(0.5, '#cfd6e2');
-    face.addColorStop(1,   '#5a6270');
+    face.addColorStop(0,   pal.spike[2]);
+    face.addColorStop(0.5, pal.steel[2]);
+    face.addColorStop(1,   pal.steel[1]);
     ctx.fillStyle = face;
     ctx.beginPath();
     ctx.moveTo(x0 + step*0.18, baseY);
@@ -2789,88 +2914,6 @@ function drawNails(n,W){
   ctx.restore();
 }
 
-/* =========================================================
-   RISER — the stone that erupts out of the floor.
-   ---------------------------------------------------------
-   Two things sell it:
-
-     · a dust plume at the base while it is climbing, so the
-       player SEES it coming rather than being teleported onto it
-     · the same crack-and-glow language as a fragile platform,
-       so the "this will give way" read is consistent across the
-       whole game
-
-   `rise` (0..1) drives both the vertical offset and the alpha,
-   so a buried stone is genuinely invisible.
-   ========================================================= */
-function drawRiser(r,W){
-  if(r.state === 'gone' || r.rise <= 0.02) return;
-
-  const e = r.rise;
-  const yOff = (1 - e) * (r.h + 26);
-  const drawY = r.y + yOff;
-
-  const urgency = r.timer > 0
-    ? Math.min(1, Math.max(0, ((r.fuse||0.6) - r.timer) / (r.fuse||0.6)))
-    : 0;
-
-  /* ---- dust plume at the base while climbing ---- */
-  if(e < 0.99){
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = (1 - e) * 0.5;
-    ctx.fillStyle = W.accent2;
-    for(let i=0;i<5;i++){
-      const px = r.x + (i+0.5) * (r.w/5);
-      const py = r.y + r.h + 6 + Math.sin(S.t*9 + i)*4;
-      ctx.beginPath(); ctx.arc(px, py, 4 + (1-e)*5, 0, 6.2832); ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  ctx.save();
-  ctx.globalAlpha = Math.min(1, e * 1.6);
-
-  /* ---- body ---- */
-  const g = ctx.createLinearGradient(0, drawY, 0, drawY + r.h);
-  g.addColorStop(0, urgency > 0 ? '#ffb98a' : W.platTop);
-  g.addColorStop(1, W.platBot);
-  rr(ctx, r.x, drawY, r.w, r.h, 5);
-  ctx.fillStyle = g;
-  ctx.fill();
-
-  /* ---- edge ---- */
-  ctx.strokeStyle = urgency > 0
-    ? 'rgba(255,150,90,' + (0.55 + urgency*0.45) + ')'
-    : 'rgba(255,255,255,.16)';
-  ctx.lineWidth = 1 + urgency;
-  ctx.stroke();
-
-  /* ---- cracks, always visible once it is up ---- */
-  ctx.strokeStyle = 'rgba(0,0,0,' + (0.26 + urgency*0.55) + ')';
-  ctx.lineWidth = 1 + urgency*1.3;
-  ctx.beginPath();
-  ctx.moveTo(r.x + r.w*0.30, drawY);
-  ctx.lineTo(r.x + r.w*0.40, drawY + r.h*0.5);
-  ctx.lineTo(r.x + r.w*0.32, drawY + r.h);
-  ctx.moveTo(r.x + r.w*0.68, drawY);
-  ctx.lineTo(r.x + r.w*0.60, drawY + r.h*0.6);
-  ctx.lineTo(r.x + r.w*0.72, drawY + r.h);
-  ctx.stroke();
-
-  /* ---- warning shimmer ---- */
-  if(urgency > 0){
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = urgency * (0.45 + 0.35*Math.sin(S.t*22));
-    ctx.fillStyle = '#ff8a4a';
-    rr(ctx, r.x+1, drawY, r.w-2, 2.5, 1.2);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.restore();
-}
 
 /* =========================================================
    CRUSHER — the stone that drops from the ceiling.
@@ -3195,12 +3238,43 @@ function buildPlayerSprites(){
   lampReady = true;
 }
 
+/* =========================================================
+   CLOAK TRAIL — the wake of a spirit that is moving fast.
+   ---------------------------------------------------------
+   The body used to be one silhouette that teleported from frame
+   to frame. Six faint copies of the last few positions, shrinking
+   and fading backwards, are what turn "displacement" into
+   "speed" — and they cost six small path fills.
+
+   `lampLagX/Y` are the spring the lantern hangs on: the hand
+   leads, the lamp follows a beat later.
+   ========================================================= */
+const trailPts = [];
+let lampLagX = 0, lampLagY = 0;
+
+function pushTrail(x, y){
+  trailPts.push({ x:x, y:y });
+  if(trailPts.length > 5) trailPts.shift();
+}
+
+/* the same silhouette drawPlayer builds, usable at any position */
+function cloakShape(){
+  ctx.beginPath();
+  ctx.moveTo(-13,0);
+  ctx.quadraticCurveTo(-11,-P.h*0.72,-6,-P.h*0.92);
+  ctx.quadraticCurveTo(0,-P.h-4,6,-P.h*0.92);
+  ctx.quadraticCurveTo(11,-P.h*0.72,13,0);
+  ctx.quadraticCurveTo(0,5,-13,0);
+  ctx.closePath();
+}
+
 function drawPlayer(W){
   if(!haloReady) buildPlayerSprites();
 
   const cx=P.x+P.w/2, cy=P.y+P.h/2;
   const bob=Math.sin(P.anim*1.6)*1.6;
   const sq=P.squash;
+  pushTrail(cx, P.y+P.h+bob);
 
   /* =========================================================
      HALO — deliberately restrained.
@@ -3218,6 +3292,24 @@ function drawPlayer(W){
   ctx.globalAlpha = 0.42;
   ctx.drawImage(haloSp, cx-hr, cy-hr, hr*2, hr*2);
   ctx.restore();
+
+  /* ---- the wake: oldest point first, each one smaller and fainter.
+          Only while the player is actually moving — six extra path
+          fills while standing still is pure waste. ---- */
+  const wake = (Math.abs(P.vx) > 55) ? trailPts.length - 1 : 0;
+  for(let i = 0; i < wake; i++){
+    const tp = trailPts[i];
+    const k = (i + 1) / trailPts.length;      /* 0 oldest → 1 newest */
+    ctx.save();
+    ctx.translate(tp.x, tp.y);
+    const ts = 0.76 + 0.22 * k;
+    ctx.scale(ts, ts);
+    ctx.globalAlpha = 0.028 + 0.050 * k;
+    ctx.fillStyle = '#ffbe73';
+    cloakShape();
+    ctx.fill();
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.translate(cx, P.y+P.h+bob);
@@ -3274,7 +3366,10 @@ function drawPlayer(W){
   ctx.beginPath(); ctx.arc( 3.9,-P.h*0.60-0.6,0.75,0,7); ctx.fill();
 
   /* ---- lantern in hand ---- */
-  const lx = P.face*12, ly = -P.h*0.42;
+  /* the hand leads, the lamp follows — the lag is mirrored with the
+     facing so it never swings the wrong way when you turn around */
+  const lx = P.face*12 + lampLagX * P.face;
+  const ly = -P.h*0.42 + lampLagY;
 
   /* the glow is small and sits BEHIND the lantern body */
   ctx.save();
@@ -3396,9 +3491,30 @@ function drawDarkness(W){
   const d=darkCx;
   d.setTransform(DPR,0,0,DPR,0,0);
   d.clearRect(0,0,VW,VH);
+  /* =========================================================
+     AMBIENT DARKNESS SCALES WITH THE OIL
+     ---------------------------------------------------------
+     `S.oil` used to move only the RADIUS of the lantern hole, so a
+     nearly empty lamp looked almost the same as a full one: the
+     light shrank from 460 to 250 world units and the air around
+     the spirit never changed. The ambient darkness now deepens as
+     the tank empties (0.26 → 0.62), so "the lantern is dying" is
+     visible in the room, not just at the edge of a circle.
+     ========================================================= */
+  const oilP = clamp(S.oil / 100, 0, 1);        /* 1 = full, 0 = dry */
+  const ambient = 0.26 + (1 - oilP) * 0.36;
   d.globalCompositeOperation='source-over';
-  d.fillStyle='rgba(6,4,12,0.42)';
+  d.fillStyle='rgba(6,4,12,' + ambient.toFixed(3) + ')';
   d.fillRect(0,0,VW,VH);
+
+  /* ---- THE SIDE SHADOW IS PAINTED INTO THE DARKNESS LAYER ----
+     It used to be blitted onto the scene AFTER the light holes, which
+     put it on top of the lantern — nothing could cut through it, and
+     the edges read as a painted black band. Drawn here, BEFORE the
+     holes, the lantern burns it away as the player walks into an
+     edge: the world lights up as you approach it. A drier lamp digs
+     a smaller hole, so the edges close in as the oil runs out. */
+  edgeShadowOn(d, 1 - oilP);
 
   d.globalCompositeOperation='destination-out';
 
@@ -3423,14 +3539,24 @@ function drawDarkness(W){
      around the spirit is lit but the spirit itself stays
      readable.
      ========================================================= */
-  const rad = (250 + 210*(S.oil/100))*SCALE;
+  /* a full lamp reaches far, an empty one barely lights the feet.
+     130 → 470 world units is a change you cannot miss, and it is
+     reinforced by the ambient darkness above and the tint below.
+     Below a third of a tank the radius also breathes, so a dying
+     lamp visibly struggles. */
+  const lowOil = (oilP < 0.34)
+    ? Math.sin(S.t * 9.7) * (0.34 - oilP) * 0.55
+    : 0;
+  const rad = (130 + 340 * oilP) * (1 + lowOil) * SCALE;
 
+  /* a fuller tank cuts a cleaner hole through the side shadow */
+  const cut = 0.48 + 0.42 * oilP;
   /* wide outer bloom — the actual illumination */
-  hole(px, py, rad*1.55, 0.55);
+  hole(px, py, rad*1.62, cut);
   /* main pool of light */
-  hole(px, py, rad, 0.72);
+  hole(px, py, rad, 0.70 + 0.26 * oilP);
   /* a small, WEAK core — just enough to keep the feet lit */
-  hole(px, py, rad*0.34, 0.40);
+  hole(px, py, rad*0.34, 0.40 + 0.26 * oilP);
 
   /* only punch light holes for objects actually near the camera —
      a 11,500-unit level has ~150 gems and every one used to cost a
@@ -3487,10 +3613,9 @@ function drawDarkness(W){
      trap. Every new family punches its own light hole so the
      lantern reveals it before it kills you:
 
-       saw     · a cold steel glint, tight radius
-       nails   · a faint metal sheen along the row
-       riser   · warm dust while it climbs, then the stone itself
-       crusher · a red warning pool at its landing spot
+               saw     · a cold steel glint, tight radius
+        nails   · a faint metal sheen along the row
+        crusher · a red warning pool at its landing spot
      ========================================================= */
   if(cur.saws) for(let i=0;i<cur.saws.length;i++){
     const s=cur.saws[i];
@@ -3504,13 +3629,7 @@ function drawDarkness(W){
     if(n.x>dL && n.x<dR)
       hole((n.x+n.w/2-S.cam)*SCALE, (n.y+n.h/2)*SCALE, (n.w*0.55+40)*SCALE, .34);
   }
-  if(cur.risers) for(let i=0;i<cur.risers.length;i++){
-    const r=cur.risers[i];
-    if(!r) continue;
-    if(r.state!=='gone' && r.x>dL && r.x<dR)
-      hole((r.x+r.w/2-S.cam)*SCALE, (r.y+r.h/2)*SCALE,
-           (60 + (1-r.rise)*70)*SCALE, r.rise>0.1 ? .5 : .28);
-  }
+
   if(cur.crushers) for(let i=0;i<cur.crushers.length;i++){
     const c=cur.crushers[i];
     if(!c) continue;
@@ -3533,32 +3652,28 @@ function drawDarkness(W){
   ctx.drawImage(darkCv, 0,0, VW, VH, 0,0, VW, VH);
   ctx.restore();
 
-  /* =========================================================
-     EDGE SHADOW — the world fades at the edges of the screen
+    /* =========================================================
+     EDGE SHADOW — not applied here any more.
      ---------------------------------------------------------
-     The lantern already lights a circle around the player, but
-     the HORIZONTAL edges of the viewport stayed fully lit, so the
-     scene looked flat: a bright band running off both sides.
-
-     This adds two soft vertical gradients over the left and right
-     edges. They are drawn AFTER the light holes, so the lantern
-     burns through them as the player approaches an edge — the
-     world literally lights up as you walk into it.
-
-     The gradients are cached in a small offscreen canvas and
-     blitted, so the cost is two drawImage calls per frame
-     regardless of viewport size.
+     It is painted into the darkness layer BEFORE the light holes
+     (top of this function), which is the only order that lets the
+     lantern burn through it. The old order put it on top of the
+     light, where nothing could ever cut it.
      ========================================================= */
-  drawEdgeShadow();
 
   /* warm light tint — blitted, and now dimmer at the centre so it
      warms the air without washing out the character */
   if(!tintReady) buildTintSprite();
-  const tr = rad*1.25;
+  const tr = rad * 1.30;
   ctx.save();
   ctx.globalCompositeOperation='lighter';
-  ctx.globalAlpha = 0.55;
-  ctx.drawImage(tintCv, px-tr, py-tr, tr*2, tr*2);
+  /* the warmth fades with the oil — a dying lamp goes COLD before it
+     goes dark, and that is the clearest warning the player can get */
+  ctx.globalAlpha = 0.18 + 0.46 * oilP;
+  /* the same struggle, in the tint: the lower the tank, the shakier */
+  const tremble = 1 - 0.07 * (1 - oilP) * Math.abs(Math.sin(S.t * 11.3));
+  const tw = tr * 2 * tremble;
+  ctx.drawImage(tintCv, px - tw/2, py - tw/2, tw, tw);
   ctx.restore();
 }
 
@@ -3579,39 +3694,53 @@ function buildEdgeShadow(){
   edgeCv.height = 1;
   edgeCx.clearRect(0, 0, 256, 1);
   const g = edgeCx.createLinearGradient(0, 0, 256, 0);
-  /* full black at the very edge, easing out to nothing */
-  g.addColorStop(0,    'rgba(4,2,10,0.92)');
-  g.addColorStop(0.28, 'rgba(4,2,10,0.62)');
-  g.addColorStop(0.62, 'rgba(4,2,10,0.24)');
+  /* deeper at the very edge and softer on the way out: the side of the
+     map should read as distance, not as a painted band. */
+  g.addColorStop(0,    'rgba(4,2,10,0.97)');
+  g.addColorStop(0.20, 'rgba(4,2,10,0.84)');
+  g.addColorStop(0.46, 'rgba(4,2,10,0.50)');
+  g.addColorStop(0.72, 'rgba(4,2,10,0.20)');
   g.addColorStop(1,    'rgba(4,2,10,0)');
   edgeCx.fillStyle = g;
   edgeCx.fillRect(0, 0, 256, 1);
   edgeReady = true;
 }
 
-function drawEdgeShadow(){
-  if(!edgeReady) buildEdgeShadow();
+/* =========================================================
+   EDGE SHADOW — now painted INTO a target canvas.
+   ---------------------------------------------------------
+   `d` is the darkness layer, and the shadow has to be on it
+   BEFORE the light holes are punched, otherwise the lantern can
+   never cut through. `extra` (0..1) deepens the band as the oil
+   runs low, so a dry lamp cannot see the edges of the map at all.
 
-  /* the band is a fraction of the viewport width, clamped so it
-     never eats the play area on a narrow screen */
-  const bandW = Math.min(VW * 0.22, 260);
+   One 256×1 strip, stretched and mirrored — two drawImage calls
+   per frame regardless of viewport size.
+   ========================================================= */
+function edgeShadowOn(d, extra){
+  if(!edgeReady) buildEdgeShadow();
+  extra = extra || 0;
+
+  /* wider and deeper than the old band: the edge of the map is a
+     threshold now, but it still never eats the play area */
+  const bandW = Math.min(VW * 0.30, 340);
   if(bandW < 8) return;
 
-  ctx.save();
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
+  d.save();
+  d.globalCompositeOperation = 'source-over';
+  d.globalAlpha = Math.min(1, 0.74 + extra * 0.26);
 
   /* LEFT edge — gradient runs dark → transparent, left to right */
-  ctx.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
+  d.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
 
   /* RIGHT edge — the same strip mirrored */
-  ctx.save();
-  ctx.translate(VW, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
-  ctx.restore();
+  d.save();
+  d.translate(VW, 0);
+  d.scale(-1, 1);
+  d.drawImage(edgeCv, 0, 0, 256, 1, 0, 0, bandW, VH);
+  d.restore();
 
-  ctx.restore();
+  d.restore();
 }
 
 /* =========================================================
@@ -3643,6 +3772,165 @@ function drawVignette(){
   ctx.save();
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.drawImage(vigCv, 0, 0, VW, VH);
+  ctx.restore();
+}
+
+/* =========================================================
+   BLOOM — the cheapest thing that makes 2D look expensive.
+   ---------------------------------------------------------
+   Bright things in a real lens spill onto their neighbours. In
+   this game the fire, the lava, the gems, the door and the
+   lantern all glowed in perfect isolation — nothing bled — and
+   that is a large part of why a technically tidy frame still
+   read as flat.
+
+   A canvas 2D bloom has no shader, so the pass is deliberately
+   dumb:
+
+     1. downsample the finished frame to 1/4 size   (blurs it)
+     2. downsample THAT to 1/8 size                 (blurs it more)
+     3. add the 1/8 back onto the 1/4 with `lighter`
+     4. composite the 1/4 back over the frame with `lighter`
+
+   Additive compositing IS the bright-pass here: a near-black
+   pixel adds almost nothing, a white-hot pixel adds a lot, and
+   the blacks never go milky. Cost is three small drawImage calls
+   per frame — and the whole thing is skipped on the "low"
+   effects setting.
+   ========================================================= */
+const bloomCv  = document.createElement('canvas');
+const bloomCx  = bloomCv.getContext('2d');
+const bloom2Cv = document.createElement('canvas');
+const bloom2Cx = bloom2Cv.getContext('2d');
+let bloomW = -1, bloomH = -1, bloomTick = 0;
+
+function drawBloom(strength){
+  if(save.settings.quality === 'low') return;
+  if(PERF.off) return;
+
+  /* 1/6 of the frame, and rebuilt on every OTHER frame. The output
+     is a blur — a one-frame-old copy is invisible — and this halves
+     the cost of the most expensive pass in the renderer. */
+  bloomTick++;
+  const bw = Math.max(2, Math.round(VW / 6));
+  const bh = Math.max(2, Math.round(VH / 6));
+  if(bw !== bloomW || bh !== bloomH){
+    bloomCv.width  = bw;  bloomCv.height  = bh;
+    bloom2Cv.width = Math.max(2, bw >> 1);
+    bloom2Cv.height= Math.max(2, bh >> 1);
+    bloomW = bw; bloomH = bh;
+  }
+
+  if((bloomTick & 1) === 0){
+  /* 1 · the frame, tiny */
+  bloomCx.globalCompositeOperation = 'source-over';
+  bloomCx.globalAlpha = 1;
+  bloomCx.clearRect(0, 0, bloomCv.width, bloomCv.height);
+  bloomCx.drawImage(canvas, 0, 0, bloomCv.width, bloomCv.height);
+
+  /* 2 · and tinier — this is where the blur comes from */
+  bloom2Cx.globalCompositeOperation = 'source-over';
+  bloom2Cx.globalAlpha = 1;
+  bloom2Cx.clearRect(0, 0, bloom2Cv.width, bloom2Cv.height);
+  bloom2Cx.drawImage(bloomCv, 0, 0, bloom2Cv.width, bloom2Cv.height);
+
+  /* =========================================================
+     3 · THE BRIGHT PASS — and the fix for the soft, milky frame.
+     ---------------------------------------------------------
+     Adding a blurred copy of the WHOLE frame back onto itself is
+     not a bloom, it is a blur: every mid-tone gets lifted by its
+     own neighbourhood average, the blacks come up to grey and the
+     whole picture loses its edges. That is exactly what the first
+     version did, and it is why the screen went hazy.
+
+     Multiply the frame by its own blurred copy instead.
+     `A × blur(A)` crushes mid-tones hard (0.5 × 0.5 = 0.25) and
+     leaves highlights nearly untouched (0.9 × 0.85 ≈ 0.76) — a
+     real bright-pass built out of canvas 2D's own compositor,
+     with no shader and no per-pixel loop. Applied twice, only the
+     fire, the lava, the gems, the door and the lantern survive it.
+     ========================================================= */
+  bloomCx.globalCompositeOperation = 'multiply';
+  bloomCx.globalAlpha = 1;
+  bloomCx.drawImage(bloom2Cv, 0, 0, bloomCv.width, bloomCv.height);
+  bloomCx.drawImage(bloom2Cv, 0, 0, bloomCv.width, bloomCv.height);
+  bloomCx.globalCompositeOperation = 'source-over';
+
+  }   /* end of the every-other-frame rebuild */
+
+  /* 4 · and back onto the frame — additive, so blacks stay black */
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = (strength === undefined) ? 0.55 : strength;
+  ctx.drawImage(bloomCv, 0, 0, VW, VH);
+  ctx.restore();
+}
+
+/* =========================================================
+   COLOUR GRADE — split-tone.
+   ---------------------------------------------------------
+   Cool above, warm below, both at single-digit alpha. It is the
+   oldest trick in colour grading, it costs exactly one gradient
+   per frame, and it is what stops a frame from looking like raw
+   canvas output: the shadows lean blue, the highlights lean
+   amber, and the two halves of the screen belong together.
+   ========================================================= */
+function drawGrade(){
+  if(PERF.off) return;
+  const g = ctx.createLinearGradient(0, 0, 0, VH);
+  g.addColorStop(0,    'rgba(34,48,92,0.065)');
+  g.addColorStop(0.45, 'rgba(0,0,0,0)');
+  g.addColorStop(0.72, 'rgba(0,0,0,0)');
+  g.addColorStop(1,    'rgba(104,48,10,0.075)');
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.restore();
+}
+
+/* =========================================================
+   FILM GRAIN — one cached noise tile, tiled and re-offset every
+   frame. Large gradients (the sky, above all) are where canvas
+   looks most plastic; a faint grain kills that. One fillRect.
+   ========================================================= */
+const grainCv = document.createElement('canvas');
+const grainCx = grainCv.getContext('2d');
+const GRAIN = 128;
+let grainReady = false, grainPat = null;
+
+function buildGrain(){
+  grainCv.width = GRAIN; grainCv.height = GRAIN;
+  const img = grainCx.createImageData(GRAIN, GRAIN);
+  const d = img.data;
+  for(let i = 0; i < d.length; i += 4){
+    const c = (Math.random() > 0.5) ? 255 : 0;
+    d[i] = d[i+1] = d[i+2] = c;
+    d[i+3] = (Math.random() * 40) | 0;      /* per-pixel weight 0..39 */
+  }
+  grainCx.putImageData(img, 0, 0);
+  grainPat = ctx.createPattern(grainCv, 'repeat');
+  grainReady = true;
+}
+
+function drawGrain(){
+  if(save.settings.quality === 'low') return;
+  if(PERF.off) return;
+  if(!grainReady) buildGrain();
+  if(!grainPat) return;
+
+  /* a new offset every frame, so the grain moves like film and not
+     like a static texture stuck to the glass */
+  const ox = (Math.random() * GRAIN) | 0;
+  const oy = (Math.random() * GRAIN) | 0;
+
+  ctx.save();
+  /* it used to be 0.22 — clearly too much: on a dark scene a grain
+     that strong reads as noise, not as film. 0.09 is texture. */
+  ctx.globalAlpha = 0.09;
+  ctx.translate(-ox, -oy);
+  ctx.fillStyle = grainPat;
+  ctx.fillRect(0, 0, VW + GRAIN, VH + GRAIN);
   ctx.restore();
 }
 
@@ -3791,6 +4079,7 @@ function render(dt){
     drawSky(W);
     drawStars(W,0.15);
     drawArches(W,0.35);
+    drawHaze(W, 0.07);       /* the far band recedes into the world's own air */
     drawMidLayer(W,0.62);
 
     ctx.save();
@@ -3818,7 +4107,7 @@ function render(dt){
     /* =========================================================
        EVERY HAZARD FAMILY MUST BE PAINTED
        ---------------------------------------------------------
-       drawNails / drawRiser / drawCrusher all existed but were
+       drawNails / drawCrusher all existed but were
        never called from the render pass, so a level that authored
        one of those families produced a hazard that could kill the
        player without ever appearing on screen. A hazard nobody can
@@ -3827,9 +4116,7 @@ function render(dt){
     if(cur.nails) for(let i=0;i<cur.nails.length;i++){
       const nn=cur.nails[i]; if(nn && vis(nn)) drawNails(nn,W);
     }
-    if(cur.risers) for(let i=0;i<cur.risers.length;i++){
-      const rs=cur.risers[i]; if(rs && vis(rs)) drawRiser(rs,W);
-    }
+
     if(cur.crushers) for(let i=0;i<cur.crushers.length;i++){
       const cs=cur.crushers[i]; if(cs && vis(cs)) drawCrusher(cs,W);
     }
@@ -3853,6 +4140,21 @@ function render(dt){
     drawDarkness(W);
     drawShade();
     drawVignette();
+
+    /* =========================================================
+       4) THE POST PASS — glow, grade, grain.
+       ---------------------------------------------------------
+       Order matters and it is the photographic one:
+         bloom   first, so the glow belongs to the image
+         grade   second, so the split-tone colours the glow too
+         grain   last, so it sits on top of everything like film
+       All three are screen-space, all three are cheap, and the
+       ones that cost anything are skipped by the "low" effects
+       setting the player can already choose in Settings.
+       ========================================================= */
+    drawBloom(0.34);
+    drawGrade();
+    drawGrain();
   } else {
     screenTransform();
     renderMenuScreen(dt);
@@ -3890,11 +4192,11 @@ const TUT = {
      for controls — a player wants to know how to move before
      anything else.
 
-     The six hazard cards below are NOT part of that sequence.
+     The five hazard cards below are NOT part of that sequence.
      They fire the first time the player actually SEES a hazard
      of that family, on any level, at any point in the run. That
      is the only moment the text is useful: a card explaining
-     saws while the player is looking at a saw. Twelve cards
+     saws while the player is looking at a saw. Five cards
      dumped on level 1 would be a wall of text nobody reads.
 
      Rules:
@@ -3914,13 +4216,34 @@ const TUT = {
     { key:'spike', probe: function(){ return nearestHazard('spikes'); } },
     { key:'saw',   probe: function(){ return nearestHazard('saws');   } },
     { key:'nail',  probe: function(){ return nearestHazard('nails');  } },
-    { key:'riser', probe: function(){ return nearestHazard('risers'); } },
+
     { key:'crush', probe: function(){ return nearestHazard('crushers'); } },
     { key:'crumb', probe: function(){ return nearestHazard('crumbs'); } }
   ],
   init(){
     this.root   = qs('#tut');
     if(!this.root) return;
+
+    /* =========================================================
+       THE CARD MUST BE THE TOP LAYER
+       ---------------------------------------------------------
+       On the emulator's browser the card rendered as faint text
+       UNDER the HUD and the menus — a lesson you cannot read is
+       worse than no lesson. The stacking is forced here as well as
+       in the stylesheet, because `backdrop-filter` (which the card
+       relies on for its panel) is not supported everywhere: when it
+       is missing the panel paints almost transparent, and the card
+       turns into the ghost in the screenshot.
+       ========================================================= */
+    this.root.style.zIndex = '9000';
+    const card = this.root.querySelector('.tut-card');
+    if(card){
+      card.style.background = 'rgba(16,11,22,0.97)';
+      card.style.border = '1px solid rgba(255,205,140,0.26)';
+      card.style.boxShadow = '0 18px 48px rgba(0,0,0,0.62)';
+      card.style.backdropFilter = 'none';
+      card.style.webkitBackdropFilter = 'none';
+    }
     this.titleEl = qs('#tut-title');
     this.bodyEl  = qs('#tut-body');
     this.dotsEl  = qs('#tut-dots');
@@ -4023,14 +4346,20 @@ const TUT = {
     this.render();
     AU.tone(760,.07,'sine',.05);
   },
-  update(){
+  update(dt){
     /* ---- the hazard cards run independently of the sequence ---- */
-    this.updateHazardCards();
+    this.updateHazardCards(dt);
 
     if(!this.active) return;
     const s = this.steps[this.step];
     if(s && s.done()) this.advance();
-  },
+  },/*
+[/OLD]
+
+    if(!this.active) return;
+    const s = this.steps[this.step];
+    if(s && s.done()) this.advance();
+  },*/
 
   /* =========================================================
      HAZARD CARD DRIVER
@@ -4040,17 +4369,33 @@ const TUT = {
      Order of business:
        1. tick down the card currently on screen, dismiss it
        2. if the main tutorial is running, do not interrupt it
-       3. scan the six families; queue any the player has not
+       3. scan the five families; queue any the player has not
           met yet and can currently see
        4. show the first queued card after a short delay
      ========================================================= */
-  updateHazardCards(){
+  /* =========================================================
+     THE CARD TIMER MUST RUN ON THE GAME CLOCK
+     ---------------------------------------------------------
+     `updateHazardCards` used a hard-coded `1/60` per call, which
+     assumed the frame rate was exactly 60 and that the function ran
+     once per frame. On a 120Hz phone the card vanished in half the
+     time it promised; on a throttled tab it stayed up for minutes.
+     It now takes the real delta time, so "seven seconds" means
+     seven seconds.
+     ========================================================= */
+  updateHazardCards(dt){
+    dt = (dt === undefined) ? 1/60 : dt;
+
     /* 1 · the card on screen */
     if(this.hazardCard){
-      this.hazardTimer -= 1/60;
+      this.hazardTimer -= dt;
       if(this.hazardTimer <= 0) hideHazardCard();
       return;
     }
+
+    /* 2 · never talk over the controls tutorial *//*
+[/OLD]
+[NEW]
 
     /* 2 · never talk over the controls tutorial */
     if(this.active) return;
@@ -4074,7 +4419,7 @@ const TUT = {
 
     /* 4 · show the next one after a beat */
     if(this.hazardQueue.length){
-      this.hazardDelay = (this.hazardDelay || 0) + 1/60;
+      this.hazardDelay = (this.hazardDelay || 0) + dt;
       if(this.hazardDelay >= 0.9){
         this.hazardDelay = 0;
         showHazardCard(this.hazardQueue.shift());
@@ -4110,7 +4455,6 @@ function nearestHazard(kind){
     if(!o) continue;
     /* a dead or buried hazard is not "there" yet */
     if(kind === 'crumbs'  && !o.alive) continue;
-    if(kind === 'risers'  && o.state === 'gone') continue;
 
     const ox = (o.x !== undefined) ? o.x : 0;
     const ow = (o.w !== undefined) ? o.w : (o.r ? o.r*2 : 0);
@@ -4684,6 +5028,42 @@ qa('#seg-sound button').forEach(function(b){
 qa('#seg-quality button').forEach(function(b){
   b.addEventListener('click', function(){ AU.click(); save.settings.quality=b.dataset.q; persist(); syncSettings(); });
 });
+/* =========================================================
+   GUIDE CARDS — bring the tutorial back on demand.
+   ---------------------------------------------------------
+   The controls tutorial is a one-shot sequence: once the player
+   skips it, `save.settings.tutorial` is set to false and it never
+   returns. That is the right default, but it left no way back —
+   a player who skipped by accident had lost the lesson for good,
+   and the Settings screen had a dead row where the fullscreen
+   toggle used to be.
+
+   This button restores the cards: it clears the "already seen"
+   record and the opt-out flag, so the controls sequence runs on
+   the next level and every hazard card can fire again the first
+   time its hazard is on screen.
+   ========================================================= */
+qs('#btn-tutorial').addEventListener('click', function(){
+  AU.click();
+  save.settings.tutorial = true;
+  save.tutorialSeen = {};
+  persist();
+  if(TUT){
+    TUT.hazardSeen = {};
+    TUT.hazardQueue = [];
+    TUT.hazardDelay = 0;
+  }
+  const btn = qs('#btn-tutorial');
+  const span = btn.querySelector('span');
+  const old = span ? span.textContent : t('settings.tutorialBtn');
+  btn.innerHTML = '<svg class="ic"><use href="#i-check"/></svg><span></span>';
+  btn.querySelector('span').textContent = (LANG==='ar') ? 'تم' : 'Done';
+  setTimeout(function(){
+    btn.innerHTML = '<svg class="ic"><use href="#i-info"/></svg><span></span>';
+    btn.querySelector('span').textContent = old;
+  }, 1400);
+});
+
 qs('#btn-reset').addEventListener('click', function(){
   AU.click();
   const btn=qs('#btn-reset');
@@ -4739,13 +5119,15 @@ function frame(now){
      movement feel chunky */
   if(dt > 0.1) dt = 0.1;
   if(dt < 0) dt = 0;
+  perfTick(dt);
+
   /* the ONLY place the game clock advances */
   S.t+=dt;
   if(S.screen==='play' && !S.paused && !S.finished){
     if(!cur) loadLevel(S.level);
     update(dt);
     updateHUD();
-    TUT.update();
+    TUT.update(dt);
   }
   if(S.screen==='play' && !S.paused && S.finished){
     /* keep particles alive during the win animation */

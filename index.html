@@ -13,20 +13,16 @@
 <meta name="description" content="روح قنديل صغيرة تعيد النور إلى بيوت مظلمة — لعبة منصّات وألغاز بخمسة عوالم وخمس وعشرين مرحلة.">
 <title>قنديل · Qandil</title>
 
-<!-- ── PWA ──────────────────────────────────────────────────────
-     `display:fullscreen` in the manifest is what actually removes
-     the browser chrome once the game is installed to the home
-     screen. Everything below is the plumbing that makes it
-     installable: the manifest itself, the icon set, and the
-     Apple-specific tags (iOS ignores the manifest's icons and
-     needs its own link rel). -->
+      <!-- ── PWA ──────────────────────────────────────────────────────
+     `display:standalone` in the manifest is what removes the browser
+     chrome once the game is installed to the home screen. Everything
+     below is the plumbing that makes it installable: the manifest
+     itself, the icon set, and the Apple-specific tags (iOS ignores
+     the manifest's icons and needs its own link rel). -->
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
-<link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+<link rel="mask-icon" href="icons/maskable.svg" color="#ffd79a">
+<link rel="apple-touch-icon" href="icons/icon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
@@ -59,10 +55,7 @@
     <symbol id="i-home" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.6L12 4l8 6.6V19a1.6 1.6 0 0 1-1.6 1.6H5.6A1.6 1.6 0 0 1 4 19z"/><path d="M9.6 20.6v-6h4.8v6"/></g></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.8l4.4 4.4L19 6.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7h15M9.5 7V4.8h5V7M6.5 7l1 12.2A1.8 1.8 0 0 0 9.3 21h5.4a1.8 1.8 0 0 0 1.8-1.8L17.5 7"/></g></symbol>
-    <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5H3.5V9M15 3.5h5.5V9M9 20.5H3.5V15M15 20.5h5.5V15"/></g></symbol>
-    <symbol id="i-collapse" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9H9V3.5M20.5 9H15V3.5M3.5 15H9v5.5M20.5 15H15v5.5"/></g></symbol>
-    <symbol id="i-expand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5H3.5V9M15 3.5h5.5V9M9 20.5H3.5V15M15 20.5h5.5V15"/></g></symbol>
-    <symbol id="i-collapse" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 9H9V3.5M20.5 9H15V3.5M3.5 15H9v5.5M20.5 15H15v5.5"/></g></symbol>
+
     <symbol id="i-lamp" viewBox="0 0 64 64">
       <path d="M32 4v8" stroke="currentColor" stroke-width="3" stroke-linecap="round" fill="none"/>
       <path d="M22 22h20l-4-9H26z" fill="currentColor" opacity=".9"/>
@@ -161,8 +154,9 @@
         <div class="row"><span data-i18n="settings.quality">جودة التأثيرات</span>
           <div class="seg" id="seg-quality"><button data-q="high" data-i18n="settings.high">عالية</button><button data-q="low" data-i18n="settings.low">خفيفة</button></div>
         </div>
-        <div class="row"><span data-i18n="settings.fullscreen">ملء الشاشة</span>
-          <button class="btn small" id="btn-fullscreen"><svg class="ic"><use href="#i-expand"/></svg><span data-i18n="settings.fullscreenBtn">تفعيل</span></button>
+
+        <div class="row"><span data-i18n="settings.tutorial">بطاقة التعليم</span>
+          <button class="btn small" id="btn-tutorial"><svg class="ic"><use href="#i-info"/></svg><span data-i18n="settings.tutorialBtn">إظهار</span></button>
         </div>
         <div class="row"><span data-i18n="settings.reset">تصفير التقدم</span>
           <button class="btn small danger" id="btn-reset"><svg class="ic"><use href="#i-trash"/></svg><span data-i18n="settings.resetBtn">مسح</span></button>

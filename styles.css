@@ -61,11 +61,11 @@ html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',san
 /* =========================================================
    MENU LAYOUT
    ---------------------------------------------------------
-   `minmax(0,1fr)` lets a column collapse to zero width when the
-   container's own size is momentarily wrong — which is exactly
-   what happens during a fullscreen transition, before `resize`
-   has re-measured the viewport. The buttons then pile into one
-   corner until something forces a reflow.
+       `minmax(0,1fr)` lets a column collapse to zero width when the
+    container's own size is momentarily wrong — which is exactly
+    what happens during a viewport transition, before `resize` has
+    re-measured the stage. The buttons then pile into one corner
+    until something forces a reflow.
 
    `minmax(min(240px,100%),1fr)` gives each column a floor, so
    the layout can never collapse. `place-content:center` keeps
@@ -246,13 +246,7 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
 .btn.small{padding:8px 16px;font-size:14px;border-radius:11px;gap:7px}
 .btn.danger{color:var(--bad);border-color:rgba(255,122,107,.35)}
 .btn.danger .ic{color:var(--bad)}
-/* the fullscreen row: a quiet toggle that lights up while active */
-#btn-fullscreen.on{
-  color:var(--gold);
-  border-color:rgba(255,201,120,.55);
-  background:rgba(255,201,120,.12);
-}
-#btn-fullscreen.on .ic{color:var(--gold)}
+
 .btn.primary::after{
   content:'';position:absolute;top:0;left:-120%;width:55%;height:100%;
   background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);

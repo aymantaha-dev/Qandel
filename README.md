@@ -16,11 +16,13 @@ light it has in its hand.
   - [Player Mechanics](#player-mechanics)
   - [Resources and Scoring](#resources-and-scoring)
   - [Hazards](#hazards)
+  - [Teaching the Hazards](#teaching-the-hazards)
 - [Content](#content)
   - [Worlds](#worlds)
   - [Levels](#levels)
 - [Project Structure](#project-structure)
 - [Running the Game](#running-the-game)
+- [Installing as an App](#installing-as-an-app)
 - [Architecture](#architecture)
   - [File Responsibilities](#file-responsibilities)
   - [Game Loop](#game-loop)
@@ -40,50 +42,63 @@ light it has in its hand.
 
 ## Overview
 
-Qandil (Arabic: قنديل, "lantern") is a 2D side-scrolling platformer with a
-light-driven theme. The core idea is simple: the character's visibility is
-tied to a finite resource. Lamp oil drains continuously, and as it drains the
-light radius around the spirit shrinks. Collecting oil flasks restores it.
-Everything else in the game — the level layouts, the hazards, the three-star
-scoring — is designed around that single tension.
+Qandil (Arabic: قنديل, "lantern") is a 2D side-scrolling platformer built
+around one tension: the character's visibility is tied to a finite resource.
+Lamp oil drains continuously, and as it drains the world goes dark — the light
+radius shrinks, the surrounding darkness deepens, and the warm tint of the
+lantern cools towards nothing. Oil flasks restore it. Level layouts, hazard
+placement and the three-star scoring are all designed around that single
+pressure.
 
-The game ships as five worlds of five levels each, twenty-five levels in
-total, with three stars available per level.
+The game ships as five worlds of five levels each — twenty-five levels, three
+stars per level.
 
 ---
 
 ## Features
 
-- **Pure vanilla stack.** No dependencies, no bundler, no transpiler. Open
-  the HTML file and it runs.
+- **Pure vanilla stack.** No dependencies, no bundler, no transpiler. Open the
+  HTML file and it runs.
 - **Zero binary assets.** Every visual is drawn with the Canvas 2D API at
-  runtime. Every sound and the entire soundtrack are synthesised with the
-  Web Audio API.
-- **Deterministic level generation.** All twenty-five levels are built at
-  load time from a seeded PRNG, so every player gets the exact same layouts
-  every time.
-- **Nine hazard families, all present from level 1.** Spikes, fire, lava,
-  saws, nails, rising stones, falling stones, fragile platforms and moving
-  platforms. Every one is taught in a survivable form and then scaled —
-  count, speed, travel and fuse all read the level's difficulty index.
-- **Contextual hazard cards.** The first time the player meets a saw, a nail
-  row, a rising stone, a falling stone or a fragile platform, a card explains
-  it — once, in place, without pausing. Persisted, so it never repeats.
-- **Variable-timing traps.** Fragile platforms and rising stones carry a
-  per-instance fuse and a `respawn` flag, so roughly half of them return and
-  half never do. The player learns the rule, not a memorised sequence.
+  runtime. Every sound and the whole soundtrack are synthesised with the Web
+  Audio API.
+- **Deterministic level generation.** All twenty-five levels are built at load
+  time from a seeded PRNG, so every player gets the same layouts on every run
+  and every device.
+- **Eight hazard families, all present from level 1.** Spikes, fire, lava,
+  saws, nails, falling stones, fragile platforms and moving platforms. Each is
+  introduced in a survivable form and then scaled — count, speed, travel and
+  fuse all read the level's difficulty index.
+- **A colour ramp per world.** Stone, rim light, shadow, haze, spike metal and
+  steel come from one table per world, so no renderer carries a hard-coded
+  colour and a single frame of a floor identifies the world.
+- **A signature per world.** Difficulty says how hard a level is; the world says
+  what kind of hard. Clay leans on gaps and fragile stone, the Mosque on
+  ceilings and nails, the Market on moving platforms and lava, the Court on
+  blades and falling stone, the Tower on all of it at once.
+- **Two hand-authored set-pieces.** A fragile bridge with one safe island and a
+  blade above it, and a gate whose low ceiling turns a jump into a scrape. One
+  lands in the middle of every level.
+- **Contextual hazard cards.** The first time the player meets a spike, a saw, a
+  nail row, a falling stone or a fragile platform, a card explains it — once, in
+  place, without pausing. Persisted, so it never repeats.
+- **Variable-timing traps.** Fragile platforms carry a per-instance fuse and a
+  `respawn` flag, so roughly half return and half never do. The player learns
+  the rule, not a memorised sequence.
 - **A fairness floor on every fuse.** Nothing crumbles in under 0.30 s of
-  contact, enforced at the builder level rather than per-template.
-- **Validated geometry.** Nothing is placed in a level without passing a
-  collision and fairness check first. No unreachable platforms, no hazards
-  hidden under a drop-off, no checkpoints floating in the void.
-- **Bilingual interface.** Full Arabic and English localisation with proper
-  RTL/LTR layout switching, not a text swap on a fixed LTR layout.
-- **Desktop and mobile.** Keyboard input on desktop, on-screen pads on
-  touch devices, and an automatic landscape rotation for portrait phones.
-- **Procedural soundtrack.** A generative chord progression with pad,
-  arpeggio and bass voices, scheduled on the audio clock so it never drifts.
-- **Persistent progress.** Stars, best times and settings are stored in
+  contact, enforced in the builder rather than per template.
+- **Validated geometry.** Nothing enters a level without passing a collision,
+  clearance and fairness check first. No floating hazards, no unreachable
+  platforms, no checkpoint standing in a fire.
+- **Bilingual interface.** Full Arabic and English localisation with real
+  RTL/LTR layout switching, not a string swap on a fixed LTR layout.
+- **Desktop and mobile.** Keyboard on desktop, on-screen pads on touch, and an
+  automatic landscape rotation for portrait phones.
+- **Procedural soundtrack.** A generative chord progression with pad, arpeggio
+  and bass voices, scheduled on the audio clock so it never drifts.
+- **Installable.** A manifest and a service worker make the game a home-screen
+  app with no browser chrome at all.
+- **Persistent progress.** Stars, best times, unlocks and settings live in
   `localStorage`.
 
 ---
@@ -99,10 +114,10 @@ total, with three stars available per level.
 | Jump | `Space` / `Up Arrow` / `W` | Jump button |
 | Pause | `Escape` / `P` | Pause icon in the HUD |
 
-Touch pads are bound with pointer events and pointer capture, so a finger
-that slides slightly off a button keeps holding it instead of dropping the
-input. The pressed state is driven from JavaScript rather than CSS `:active`
-so it responds on the first frame.
+Touch pads are bound with pointer events and pointer capture, so a finger that
+slides slightly off a button keeps holding it instead of dropping the input. The
+pressed state is driven from JavaScript rather than CSS `:active`, so it lights
+up on the first frame.
 
 ### Player Mechanics
 
@@ -117,35 +132,36 @@ so it responds on the first frame.
 | First jump | 780 units/s |
 | Second jump | 690 units/s |
 
-The movement model includes three quality-of-life details that matter a lot
-in practice:
+Three details of the movement model matter more than they look:
 
-- **Coyote time** — a 0.1 s window after leaving a ledge during which a jump
-  still counts as a ground jump.
+- **Coyote time** — 0.1 s after leaving a ledge during which a jump still counts
+  as a ground jump.
 - **Jump buffering** — a jump pressed up to 0.13 s before landing fires the
-  moment the character touches the ground.
-- **Variable jump height** — releasing the jump key while rising applies
-  extra gravity, giving short hops and full arcs from the same button.
+  moment the feet touch.
+- **Variable height** — releasing the jump key while rising applies extra
+  gravity, so the same button gives both short hops and full arcs.
 
 The second jump is deliberately weaker than the first so the arc stays
 controllable, and it refills the instant the player is grounded.
 
 ### Resources and Scoring
 
-**Hearts.** Five per level. Losing a heart respawns the player at the last
-checkpoint reached, with 1.4 s of invulnerability so a single mistake cannot
-chain into a second death. When the fifth heart is lost, the level ends and
-the player chooses between retrying and returning to the menu.
+**Hearts.** Five per level. Losing one returns you to the last checkpoint you
+claimed, with 1.4 s of invulnerability so a single mistake cannot chain into a
+second death. When the fifth heart goes the level ends, and the player chooses
+between retrying it and returning to the menu.
 
-**Oil.** Starts at 100 and drains at 1.6 units/s, so a full tank lasts about
-62 seconds. Each flask restores 38 units. The light radius around the spirit
-scales with the remaining oil, which means running dry does not kill you
-directly — it removes your ability to see what is coming.
+**Oil.** Starts at 100 and drains at 1.6 units/s, so a full tank lasts about 62
+seconds. Each flask restores 38 units. The lantern's reach runs from 470 world
+units on a full tank down to 130 on empty; the ambient darkness deepens from
+0.26 to 0.62 over the same span, the warm tint cools, and below a third the
+light begins to tremble. Running dry does not kill you — it removes your ability
+to see what is coming.
 
-**Gems.** Each level has a fixed set. Collecting all of them is required for
-a high score.
+**Gems.** A fixed set per level. Collecting all of them is required for a high
+score.
 
-**Stars.** Awarded at the end of a level:
+**Stars.** Awarded when a level ends:
 
 | Stars | Condition |
 | --- | --- |
@@ -153,65 +169,66 @@ a high score.
 | 2 | Reach the door and collect every gem |
 | 3 | Reach the door, collect every gem, and finish within par time |
 
-Par time is computed per level from its width and its hazard density, so a
-dense late-game level gets a proportionally larger allowance rather than
-sharing a flat multiplier with an easy opening level.
+Par time is computed per level from its width and its hazard density, so a dense
+late level gets a proportionally larger allowance instead of sharing a flat
+multiplier with an easy opening level.
 
 ### Hazards
 
-Nine hazard families. **Every one of them appears from level 1**, in its
-simplest survivable form; what scales with difficulty is count, speed, size
-and timing — never the rule itself.
+Eight hazard families. **Every one appears from level 1**, in its simplest
+survivable form; what scales with difficulty is count, speed, size and timing —
+never the rule itself.
 
 | Hazard | Behaviour | Tell |
 | --- | --- | --- |
-| Spikes | Static row, always lethal | Dark base wedge with a lit bevel and a hard specular tip |
-| Fire | Pulsing flame, active ~57% of its cycle | Embers drift even while it is out, so the pit stays visible |
-| Lava | Static pool, always lethal | Molten body with a bright surface band and rising heat haze |
-| Saws | Spinning blade on a fixed patrol path (`x`, `y` or orbit) | Twelve real teeth, a hot rim and a hazard glow |
-| Nails | Dense short metal rows, floor (`dir 1`) or ceiling (`dir -1`) | Thinner and brighter than spikes, with a visible base rail |
-| Rising stones | Erupt from the floor near the player, then crumble after a fuse | A dust plume while climbing, then the same crack-and-glow as a fragile platform |
-| Falling stones | Hang from the ceiling, drop when the player passes under | A dashed red rail showing exactly where they will land |
-| Fragile platforms | Crumble a variable time after being stood on | Hairline cracks are always visible; they widen and glow during the countdown |
+| Spikes | Static row, always lethal | Dark wedge with a lit bevel and a specular tip, in the world's own spike ramp |
+| Fire | Pulsing flame, active about 57% of its cycle | Embers drift even while it is out, so the pit stays visible |
+| Lava | Static pit, always lethal | Molten body filling the whole chasm, a white-hot meniscus and lifting heat |
+| Saws | Spinning blade on a fixed patrol (`x`, `y` or orbit) | Twelve real teeth, a hot rim and a hazard glow |
+| Nails | Dense short metal rows, floor or ceiling | Thinner and brighter than spikes, with a visible base rail |
+| Falling stones | Hang from a ceiling, drop when the player passes under | A dashed red rail showing exactly where they will land |
+| Fragile platforms | Crumble a variable time after being stood on | The same stone as the ground, warming from the inside |
 | Moving platforms | Carry the player over voids | Chains above, a lit underside, direction chevrons on the deck |
 | Falling out of the world | Lethal | — |
 
 **Fairness floor.** No fragile surface may vanish in under `TUNE.FUSE_MIN`
 (0.30 s) of contact. Below that the player physically cannot react, and the
-death stops being their fault. Every fuse in the game is clamped to that
-value inside `Builder.crumb()` and `Builder.riser()`.
+death stops being their fault. Every fuse is clamped to that value inside
+`Builder.crumb()`.
 
-**Visibility.** Every hazard punches its own hole in the darkness layer, so
-the lantern reveals it before it can kill you. A hazard you cannot see is not
-a hazard, it is a trap.
+**One continuous surface.** A ground hazard is legal only when its whole
+footprint stands on a single platform at a single height. The builder probes the
+entire row rather than its centre, so no spike or flame can overhang an edge.
 
-**Variation, not randomness.** Fragile platforms carry a per-platform fuse
-and a `respawn` flag — roughly half of them come back after a cooldown, half
-never do. Rising stones do the same. The result is a chain that cannot be
-memorised as a fixed shape: the player learns the *rule* (keep moving) rather
-than the *timing* of one specific platform.
+**Visibility.** Every hazard punches its own hole in the darkness layer, so the
+lantern reveals it before it can kill you. A hazard you cannot see is not a
+hazard, it is a trap.
 
-### Teaching the hazards
+**Variation, not randomness.** Fragile platforms carry a per-platform fuse and a
+`respawn` flag — roughly half come back after a cooldown, half never do. A chain
+therefore cannot be memorised as a fixed shape: the player learns the *rule*
+(keep moving) rather than the *timing* of one specific platform.
 
-The controls tutorial is a six-step sequence that runs once, on level 1.
-The hazards are taught separately, and contextually:
+### Teaching the Hazards
 
-- Each of the six hazard families (spikes, saws, nails, rising stones,
-  falling stones, fragile platforms) has its own card.
-- A card fires the **first time the player actually sees** that hazard —
-  on any level, at any point in the run — when it is within about 1.5
-  screens ahead of them.
+The controls tutorial is a six-step sequence that runs once, on level 1, and
+advances the moment the player performs each action rather than on a timer.
+
+Hazards are taught separately, and contextually:
+
+- Each of the five carded families — spikes, saws, nails, falling stones,
+  fragile platforms — has its own card.
+- A card fires the **first time the player actually sees** that hazard, on any
+  level, at any point in a run.
 - Each card fires **at most once, ever**, and the fact is persisted in
-  `save.tutorialSeen`, so a returning player is never told about saws again
-  on level 12.
-- The card never pauses the game. It is a small card in the corner, it
-  auto-dismisses after seven seconds, and tapping it dismisses it early.
-- Cards never interrupt the controls tutorial: while `TUT.active` is true
-  the hazard driver stands down.
+  `save.tutorialSeen`, so a returning player is never told about saws again.
+- The card never pauses the game. It sits in the corner, dismisses itself after
+  seven seconds, and can be tapped away early.
+- Cards never interrupt the controls sequence: while the tutorial is running the
+  hazard driver stands down.
 
-The reasoning is simple: a card explaining saws is only useful while the
-player is looking at a saw. Twelve cards dumped on level 1 would be a wall
-of text nobody reads.
+A card explaining saws is only useful while the player is looking at a saw. A
+card for every hazard, served on level 1, would be a wall of text nobody reads.
 
 ---
 
@@ -227,30 +244,32 @@ of text nobody reads.
 | 4 | The Ruined Court | Violet dust, cracked stone with moss, broken colonnades |
 | 5 | Lantern Tower | Ember orange, riveted iron, tapering spires |
 
-Each world has its own sky gradient, atmospheric layer, background
-silhouette style, mid-layer parallax band, platform material and accent
-palette. The music tempo rises slightly with the world index.
+Each world carries a full colour ramp in `PALETTE` — a stone trio, a rim colour,
+a shadow colour, a haze colour, a spike trio and a steel trio — which
+`levels.js` attaches to the world so `game.js` reads it as `W.pal`. On top of
+that, each world has its own sky gradient, atmospheric layer, background
+silhouette style and mid-layer parallax band. The music tempo rises slightly
+with the world index.
 
 ### Levels
 
-Twenty-five levels, five per world. Level width grows from 8,400 to 11,600
-world units.
+Twenty-five levels, five per world. Width grows from 8,400 to 11,600 world
+units across the set.
 
-**Difficulty curve.** A convex ramp, `0.14 + (index/24)^1.30 * 0.86`, clamped
-to 1.00:
+**Difficulty curve.** A convex ramp, `0.10 + (index/24)^1.35 * 0.88`, capped at
+0.98:
 
 | Level | `baseDiff` | What it feels like |
 | --- | --- | --- |
-| 1 | 0.14 | One slow saw, one short nail row, one wide riser — a teaching level |
-| 5 | 0.26 | Two of each, faster; fire and lava arrive |
-| 10 | 0.42 | Fragile chains, moving platforms, ceiling nails |
-| 15 | 0.60 | Rising stones over voids, falling stones begin |
-| 20 | 0.80 | Four saws, six nail rows, tight fuses |
-| 25 | 1.00 | Everything at maximum: fastest blades, shortest fuses, densest mix |
+| 1 | 0.10 | One slow blade, one short spike row, unbroken floor — a teaching level |
+| 5 | 0.18 | Two of each, faster; fire arrives |
+| 10 | 0.33 | Fragile chains, moving platforms, ceiling nails |
+| 15 | 0.53 | Chasms and lava; falling stones become routine |
+| 20 | 0.74 | Four saws, five nail rows, tight fuses |
+| 25 | 0.98 | Everything at maximum: fastest blades, shortest fuses, densest mix |
 
-The floor of 0.14 (was 0.10) means even level 1 has a real hazard mix rather
-than empty ground, and the `^1.30` exponent makes the last five levels climb
-steeply enough to feel like a different game from the opening.
+The low floor lets level 1 open gently, and the exponent makes the last five
+levels climb steeply enough to read as a different game from the opening.
 
 <details>
 <summary>Full level list</summary>
@@ -294,9 +313,9 @@ Qandel/
 ├── index.html              Markup, inline SVG icon sprite, all screens and overlays
 ├── styles.css              Design tokens, layout, components, responsive rules
 ├── i18n.js                 Arabic and English string tables, language switching
-├── levels.js               World definitions, level builder, all 25 levels
+├── levels.js               Worlds, palette, builder, generator, all 25 levels
 ├── game.js                 State, physics, rendering, audio, input, UI wiring
-├── manifest.webmanifest    PWA manifest — display:fullscreen, icons, orientation
+├── manifest.webmanifest    PWA manifest — standalone display, icons, orientation
 ├── sw.js                   Service worker — offline shell, cache versioning
 ├── icons/
 │   ├── icon.svg            The lantern spirit, full-bleed
@@ -307,11 +326,11 @@ Qandel/
 │   ├── maskable-512.png    Rasterised from maskable.svg
 │   └── make-icons.html     Opens in a browser; renders the four PNGs to download
 ├── README.md               This file
-└── STORY.md                Narrative, worlds, difficulty curve
+└── STORY.md                Narrative, worlds, progression
 ```
 
-Load order in `index.html` is `i18n.js`, then `levels.js`, then `game.js`.
-The first two define the globals that `game.js` consumes at boot.
+Load order in `index.html` is `i18n.js`, then `levels.js`, then `game.js`. The
+first two define the globals that `game.js` consumes at boot.
 
 ---
 
@@ -320,10 +339,9 @@ The first two define the globals that `game.js` consumes at boot.
 No installation and no build step are required.
 
 **Local file.** Open `index.html` directly in a browser. Everything works,
-including `localStorage`, on modern browsers.
+including `localStorage`, on a modern browser.
 
-**Local server.** Recommended if you plan to test on a phone over your
-network:
+**Local server.** Recommended for testing on a phone across your network:
 
 ```bash
 # Python 3
@@ -336,64 +354,51 @@ npx serve .
 Then open `http://localhost:8000`.
 
 **Static hosting.** The project is a set of static files. Drop the folder on
-GitHub Pages, Netlify, Vercel, Cloudflare Pages or any static host and it
-works unchanged.
+GitHub Pages, Netlify, Vercel, Cloudflare Pages or any static host and it works
+unchanged.
 
 ---
 
-## Installing as an App (PWA)
+## Installing as an App
 
-The game can be installed to a phone's home screen and then runs with **no
-browser chrome at all** — no URL bar, no toolbar, no status bar.
+The game installs to a phone's home screen and then runs with **no browser
+chrome at all** — no URL bar, no toolbar, no status bar.
 
-### Why the manifest, and not CSS
-
-The URL bar and the toolbar are the browser's own interface. They are not part
-of the page, and no amount of CSS or JavaScript can hide them from inside a
-normal tab. There are exactly two honest routes to a chrome-free game:
-
-| Route | What it does | Limitation |
-| --- | --- | --- |
-| **Fullscreen API** | Hides the chrome for the current tab | Needs a user gesture; no element fullscreen on iOS Safari |
-| **Installing the PWA** | `display:fullscreen` removes the chrome permanently | Needs HTTPS and a manifest |
-
-Qandil does both. Every entry point that is already a tap — *Begin Journey*,
-a level tile, the Fullscreen row in Settings — calls the Fullscreen API, so a
-desktop or Android player gets an edge-to-edge game immediately. Installing
-the app is what makes it stick.
+The URL bar is the browser's own interface, and no amount of CSS or JavaScript
+can hide it from inside a normal tab. The only honest route to a chrome-free
+game is installing the app. The Fullscreen API is deliberately not used: it
+creates a second, competing layout mode in which the viewport changes size
+underneath a page whose CSS has already been measured. One mode is better than
+two, and the app window is the mode.
 
 ### The files
 
-**`manifest.webmanifest`** declares `display: "fullscreen"`,
-`orientation: "landscape"`, the theme colour, and the icon set. The
-`display_override` array lists `fullscreen` first with `standalone` and
-`minimal-ui` as fallbacks, so a browser that does not support true fullscreen
-still installs the game in the best mode it can.
+**`manifest.webmanifest`** declares `display: "standalone"`,
+`orientation: "landscape"`, the theme colour and the icon set.
 
 **`sw.js`** is the service worker. It precaches the shell — the three scripts,
-the stylesheet, the manifest and the icons — so the game boots and is fully
-playable with no network. Its strategy is deliberately split:
+the stylesheet, the manifest and the icons — so the game boots and is playable
+with no network. Its strategy is deliberately split:
 
-- **Navigations** are network-first, so a deploy is picked up on the next
-  launch, with the cache as the offline fallback.
+- **Navigations** are network-first, so a deploy is picked up on the next launch,
+  with the cache as the offline fallback.
 - **Same-origin assets** are cache-first, because the scripts and styles never
   change mid-session.
-- **Cross-origin requests** (Google Fonts) are never cached. Caching them
-  stores opaque responses that then fail to render offline.
+- **Cross-origin requests** (Google Fonts) are never cached. Caching them stores
+  opaque responses that then fail to render offline.
 - **Non-GET requests** pass straight through.
 
-The cache name carries a version string. Bumping `VERSION` in `sw.js` retires
-every old entry on the next activation, which is the only reliable way to
-avoid serving a stale build.
+The cache name carries a version string. Bumping `VERSION` retires every old
+entry on the next activation, which is the only reliable way to avoid serving a
+stale build.
 
 **`icons/`** holds the artwork. `icon.svg` is the lantern spirit drawn with the
-same geometry and the same gradients as `drawPlayer()` in `game.js` — the
-cloak, the two dark eyes with their highlight dots, and the small caged lantern
-with its white core. `maskable.svg` is the same drawing scaled to 74% and
-re-centred, because Android crops maskable icons to a circle and anything
-outside the 80% safe zone is lost. `make-icons.html` rasterises both SVGs into
-the four PNG sizes the manifest asks for; open it in a browser and download
-the results into `icons/`.
+same geometry and gradients as `drawPlayer()` — the cloak, the two dark eyes
+with their highlight dots, and the small caged lantern with its white core.
+`maskable.svg` is the same drawing scaled to 74% and re-centred, because Android
+crops maskable icons to a circle and anything outside the safe zone is lost.
+`make-icons.html` rasterises both SVGs into the four PNG sizes the manifest asks
+for.
 
 ### Requirements
 
@@ -407,7 +412,7 @@ the results into `icons/`.
 2. Open it in Chrome or Safari.
 3. Chrome: the install icon appears in the address bar. Safari (iOS): Share →
    *Add to Home Screen*.
-4. Launch from the home screen — the game opens in landscape, fullscreen, with
+4. Launch from the home screen — the game opens in landscape, standalone, with
    no browser interface.
 
 ---
@@ -416,31 +421,29 @@ the results into `icons/`.
 
 ### File Responsibilities
 
-**`index.html`** holds the entire DOM: one canvas, four screens (menu,
-levels, settings, about), four overlays (pause, game over, results,
-tutorial), the HUD, the touch pads, and an inline SVG sprite of every icon
-used in the interface. Icons are referenced with `<use href="#id">`, so no
-icon file is ever requested.
+**`index.html`** holds the entire DOM: one canvas, four screens (menu, levels,
+settings, about), three overlays plus the tutorial card, the HUD, the touch pads
+and an inline SVG sprite of every icon in the interface. Icons are referenced
+with `<use href="#id">`, so no icon file is ever requested.
 
-**`styles.css`** is organised in sections: design tokens, layout, menu,
-buttons, screens, HUD, overlays, touch controls, tutorial card, game over
-sheet, then media queries for small screens and reduced motion. Sizing uses
-`clamp()` throughout so the interface scales continuously instead of
-snapping at breakpoints.
+**`styles.css`** is organised in sections: design tokens, layout, menu, buttons,
+screens, HUD, overlays, touch controls, tutorial card, game-over sheet, then
+media queries for small screens and reduced motion. Sizing uses `clamp()`
+throughout, so the interface scales continuously instead of snapping at
+breakpoints.
 
-**`i18n.js`** exports two flat key/value tables and three functions: `t()`
-for lookup, `applyI18n()` to walk every `[data-i18n]` element, and
-`setLang()` to switch and persist the choice.
+**`i18n.js`** exposes two flat key/value tables and three functions: `t()` for
+lookup, `applyI18n()` to walk every `[data-i18n]` element, and `setLang()` to
+switch and persist the choice.
 
-**`levels.js`** defines the five worlds, the tuning constants, a seeded
-PRNG, the `Builder` class with its placement and validation API (including
-the four new hazard families), thirteen segment templates, the segment
-picker, and the assembly routine that produces all twenty-five levels at
-load.
+**`levels.js`** defines the five worlds, the colour ramp table, the tuning
+constants, a seeded PRNG, the `Builder` with its placement and validation API,
+fourteen segment templates, the segment picker with its per-world weight tables,
+and the assembly routine that produces all twenty-five levels at load.
 
 **`game.js`** is a single IIFE in strict mode. It owns the canvas, the game
-state, the physics step, the render pipeline, the audio engines, input
-handling and all UI wiring.
+state, the physics step, the render pipeline, the audio engines, input handling
+and all UI wiring.
 
 ### Game Loop
 
@@ -449,70 +452,78 @@ One `requestAnimationFrame` loop drives everything.
 ```
 frame(now)
   ├─ dt = clamp((now - last) / 1000, 0, 0.1)
-  ├─ S.t += dt                      // the only place the clock advances
+  ├─ perfTick(dt)                    // adaptive post-processing guard
+  ├─ S.t += dt                       // the only place the clock advances
   ├─ if playing and not paused:
-  │    ├─ update(dt)                // physics, collisions, pickups
+  │    ├─ update(dt)                 // physics, collisions, pickups
   │    ├─ updateHUD()
-  │    └─ TUT.update()
+  │    └─ TUT.update(dt)
   └─ render(dt)
 ```
 
-Delta time is clamped at 0.1 s. That is high enough not to cut real frames on
-a 60 Hz display, but low enough that a tab switch cannot teleport the player
-through a wall. The game clock `S.t` advances in exactly one place, which
-keeps every animation — flames, embers, gem bobbing, water bubbles — in sync
-with the simulation.
+Delta time is clamped at 0.1 s: high enough not to cut real frames on a 60 Hz
+display, low enough that a tab switch cannot teleport the player through a wall.
+The game clock `S.t` advances in exactly one place, which keeps every animation
+— flames, embers, gem bobbing, lava bubbles, the trailing cloak — in sync with
+the simulation.
 
-The HUD is updated through a small cache so `textContent` and inline styles
-are only written when a value actually changes, avoiding a forced re-layout
-sixty times a second.
+The HUD is written through a small cache, so `textContent` and inline styles are
+only touched when a value actually changes, avoiding a forced re-layout sixty
+times a second.
 
 ### Rendering Pipeline
 
-Each frame is drawn in three passes.
+Each frame is drawn in four passes.
 
-1. **World pass.** The canvas transform is scaled by `SCALE` (viewport height
-   divided by the 540-unit authoring height) so the world is always authored
-   at a constant vertical field of view. Inside this pass: sky gradient,
-   atmospheric layer, stars, far silhouettes, mid parallax, then everything
-   inside the camera window — platforms, moving platforms, ceilings, lava,
-   fragile platforms, rising stones, spikes, nails, falling stones,
-   checkpoints, the goal, gems, flasks, the player, fire, particles, and
-   finally the saws — drawn last so a blade always reads as being in front of
-   the player.
+1. **World pass.** The transform is scaled by `SCALE` (viewport height divided
+   by the 540-unit authoring height), so the world is always authored at a
+   constant vertical field of view. Inside this pass: sky gradient, atmospheric
+   layer, stars, far silhouettes, a haze band tinted with the world's own air
+   colour, mid parallax, then everything inside the camera window — platforms,
+   moving platforms, ceilings, lava, fragile platforms, spikes, nails, falling
+   stones, checkpoints, the goal, gems, flasks, the player and its wake, fire,
+   particles, and finally the saws, drawn last so a blade always reads as being
+   in front of the player.
 
-2. **Darkness pass.** A separate offscreen canvas is filled with a translucent
-   dark overlay, then punched through with `destination-out` at the player's
-   position and at every nearby light source, using a pre-rasterised radial
-   gradient sprite. The result is composited over the scene, followed by a
-   warm additive tint that gives the lantern light its colour.
+2. **Darkness pass.** An offscreen canvas is filled with a translucent dark
+   overlay whose strength grows as the oil drains. The side shadows of the map
+   are painted into this layer *before* the light holes, so the lantern cuts
+   through them as the player walks into an edge and the world lights up on
+   approach. The layer is then punched with `destination-out` at the player and
+   at every nearby light source using a pre-rasterised radial sprite, composited
+   over the scene, and followed by a warm additive tint whose warmth also
+   follows the oil.
 
-3. **Screen-space pass.** Vignette, drawn from a cached canvas that is only
-   rebuilt when the viewport size changes.
+3. **Overlay pass.** Vignette and a top/bottom shade, both drawn from cached
+   canvases that are rebuilt only when the viewport size changes.
 
-Everything outside the camera window plus a 140-unit margin is culled before
-it reaches a draw call.
+4. **Post pass.** Bloom, then split-tone grade, then film grain — in that order,
+   so the glow belongs to the image, the grade colours the glow, and the grain
+   sits on top like film. Bloom samples the frame at one sixth of its size and is
+   rebuilt on every other frame.
+
+Everything outside the camera window plus a 140-unit margin is culled before it
+reaches a draw call.
 
 ### Procedural Level Generation
 
-Levels are generated, not hand-placed, but they are fully deterministic.
+Levels are generated rather than hand-placed, and fully deterministic.
 
-**Seeding.** A mulberry32 PRNG is seeded per level index with a fixed
-constant mixed with the index. The same build produces the same twenty-five
-levels on every machine, every run.
+**Seeding.** A mulberry32 PRNG is seeded per level index with a fixed constant
+mixed with the index. The same build produces the same twenty-five levels on
+every machine, every run.
 
-**The Builder.** Every placement goes through a method that validates before
-it commits. `plat()`, `ceil()`, `crumb()` and `mover()` all run a padded
-overlap test against existing geometry and refuse the placement if it
-collides. `spike()`, `fire()` and `lava()` are stricter: a hazard must rest
-on real solid ground, must leave a minimum headroom above it, must not
-overlap anything, and must have nothing suspended directly over its
-footprint. That last rule is what prevents a floating platform from sitting
-just above a fire, where the player would drop off it straight into flames
-with no chance to react.
+**The Builder.** Every placement goes through a method that validates before it
+commits. `plat()`, `ceil()`, `crumb()` and `mover()` run a padded overlap test
+against existing geometry and refuse a collision. `spike()`, `fire()` and
+`nail()` are stricter: a ground hazard must rest on one continuous surface, must
+leave a minimum headroom above it, must not overlap anything, and must have
+nothing suspended directly over its footprint. `crusher()` additionally demands
+a real ceiling to hang from and a drop that reaches walkable ground.
 
-**Segments.** Thirteen templates, each self-contained and each guaranteed to
-end on solid ground:
+**Segments.** Fourteen templates, each self-contained and each guaranteed to end
+on solid ground. Twelve are generated from the difficulty index; `bridge` and
+`gate` are hand-authored set-pieces with an identical layout on every seed.
 
 | Segment | Shape |
 | --- | --- |
@@ -521,68 +532,78 @@ end on solid ground:
 | `stairs` | Rising or falling staircase |
 | `island` | Floating islands over a void |
 | `nails` | Floor rows plus ceiling slabs with hanging nails |
-| `saws` | Blades patrolling the floor line; the floor breaks up at high difficulty |
+| `saws` | Blades patrolling the floor line on a fixed grid |
 | `corridor` | A low ceiling that forces careful jumps |
 | `mover` | A chasm crossed on moving platforms |
 | `lava` | A pool crossed on stepping stones |
 | `crumble` | A chain of fragile platforms with variable fuses |
-| `rise` | A void crossed on stones that erupt from the floor |
 | `crushers` | A hall of stones that drop from the ceiling |
-| `gauntlet` | Saw → nails → riser → crusher → saw, in one readable run |
+| `gauntlet` | Saw, nails, saw, crusher, saw — one readable run |
+| `bridge` | A fragile bridge, one safe island, one blade above it |
+| `gate` | Low slabs with a floor hazard beneath, twice or more in a row |
 
-**Every family is available from level 1.** The previous table gated each
-mechanic behind a high `unlockAt`, so a player could finish a third of the
-game without ever meeting the saws. The new rule is the opposite: `unlockAt`
-values run from 0.00 to 0.30, which every level satisfies, and the segment
-functions themselves read `diff` and scale count, speed, travel and fuse. A
-level-1 saw run is one slow blade over open ground; a level-25 saw run is
-four fast ones over a floor that is no longer continuous.
+**Every family is available from level 1.** `unlockAt` values run from 0.00 to
+0.30, which every level satisfies, and the segment functions themselves read
+`diff` and scale count, speed, travel and fuse. A level-1 saw run is one slow
+blade over open ground; a late one is four fast blades with twice the patrol.
 
-The picker never repeats the same template twice in a row, and gives a
-temporary weight boost to a template that has just unlocked so the player
-actually meets the new mechanic. `run` and `gap` weights *decay* with
-difficulty (1.60 → 0.50), so the back half of the game is genuinely dense
-instead of mostly open floor.
+**Picker rules.** The picker never repeats a template twice in a row, and boosts
+one that has just entered the pool so the player meets it repeatedly rather than
+once. `run` and `gap` weights *decay* with difficulty (1.60 → 0.50), so the back
+half of the game is genuinely dense rather than mostly open floor.
 
-**Ordering matters.** Inside several templates the order of placement is
-load-bearing. In `run`, floating platforms are placed before hazards so the
-hazard pass can see them and refuse to put fire underneath. In `lava`, the
-stepping stones go down before the pool, because the pool reserves its whole
-footprint and would otherwise reject every stone inside it, producing a
-crossing with nothing to cross on. In `mover` and `crumble`, both banks are
+**World signature.** `pickSegment()` also takes the level's world index and
+multiplies each template's weight by a `WORLD_BIAS` entry. The multipliers are
+gentle — nothing becomes impossible, only characteristic — so five worlds stop
+being five tints of one level.
+
+**Pacing.** Every fourth segment is a set-piece. A weighted draw produces
+density but never rhythm; one authored moment per stretch gives a level a shape
+the player can remember.
+
+**Ordering matters.** The order of placement inside several templates is
+load-bearing. In `run`, floating platforms go down before hazards so the hazard
+pass can see them and refuse a fire underneath. In `lava`, the stepping stones
+go down before the pool, because the pool reserves its whole footprint and would
+otherwise reject every stone inside it. In `mover` and `crumble`, both banks are
 placed first so the crossing has a corridor to exist in.
 
 **Post-assembly passes.** Once the level is assembled:
 
-- A **quota pass** tops up any hazard category that came out below its
-  target, since the segment picker is probabilistic and could otherwise
-  produce a level with no fires or no movers at all. It only ever adds, and
-  every addition goes through the same validation.
-- A **checkpoint pass** filters candidates: must sit on solid ground, never
-  on a fragile platform, clear of hazards on both sides, and spaced at least
-  900 units apart. An early checkpoint is inserted if the first one would
-  otherwise be too far from the spawn.
+- A **quota pass** tops up any hazard family that came out below its target,
+  since the picker is probabilistic. It only ever adds, and every addition goes
+  through the same validation.
+- A **checkpoint pass** filters candidates: solid ground, never a fragile
+  platform, clear of every lethal family within a 220-unit forward and 170-unit
+  backward window — including the full sweep of a saw — and at least 900 units
+  apart. The fallback checkpoint is found by searching for a safe spot rather
+  than assuming one. Each checkpoint stores the platform it hangs from, so a
+  respawn places the feet on that surface with the whole body inside the stone.
 - An **oil pass** places flasks at fixed intervals, always on solid ground.
-- A **gem cleanup pass** drops any gem that ended up buried inside geometry.
+- A **gem cleanup pass** drops any gem that ended up buried in geometry.
+
+**Determinism.** Everything above is seeded from the level index alone, so the
+geometry — platforms, hazards, gems, flasks, checkpoints — is identical for
+every player, every run. A level can therefore be learned and a route optimised.
 
 ### Audio Engine
 
 Two independent systems share a single `AudioContext`.
 
-**Sound effects** are short oscillator tones with exponential gain
-envelopes — a rising triangle for a jump, a two-note sine pair for a gem, a
-descending sawtooth for a death, a four-note arpeggio for a win.
+**Sound effects** are short oscillator tones with exponential gain envelopes — a
+rising triangle for a jump, a two-note sine pair for a gem, a descending sawtooth
+for a death, a four-note arpeggio for a win.
 
-**Music** is a generative sequencer. It runs an Am – F – C – G progression in
-A minor at 70 BPM (rising slightly with the world index), with three voice
-types: a soft detuned pad, a plucked bell arpeggio, and a round sine bass.
-Everything is scheduled ahead of time on the audio clock rather than triggered
-from a timer callback, so the tempo stays exact even when the tab is
-throttled. A slow low-pass filter and a gentle stereo panner keep it soft.
+**Music** is a generative sequencer. It runs an Am – F – C – G progression in A
+minor at 70 BPM (rising slightly with the world index), with three voice types:
+a soft detuned pad, a plucked bell arpeggio, and a round sine bass. Everything is
+scheduled ahead of time on the audio clock rather than triggered from a timer, so
+the tempo stays exact even when the tab is throttled. A slow low-pass filter and
+a gentle stereo panner keep it soft.
 
-The context is only created after a real user gesture, as browsers require.
-It is suspended when the page is hidden and resumed on return, and the
-soundtrack is hard-killed on `pagehide` and `beforeunload`.
+The context is only created after a real user gesture, as browsers require. It is
+suspended when the page is hidden and resumed on return, and the soundtrack is
+hard-killed on `pagehide` and `beforeunload`.
 
 ### Persistence
 
@@ -590,76 +611,91 @@ Two `localStorage` keys:
 
 | Key | Contents |
 | --- | --- |
-| `qandil.save.v1` | Per-level stars and best time, plus settings (sound, music, effect quality, tutorial seen) |
+| `qandil.save.v1` | Per-level stars and best time, the unlock record, and settings (sound, music, effects quality, tutorial flags) |
 | `qandil.lang` | Selected language |
 
-Both reads and writes are wrapped in `try/catch`, so the game runs normally
-in private browsing modes where storage may be unavailable or throw.
+Both reads and writes are wrapped in `try/catch`, so the game runs normally in
+private browsing modes where storage may be unavailable or throw.
 
-Level unlocking is derived, not stored: level *n* is unlocked when level
-*n − 1* has at least one star. Level 1 is always unlocked.
+Level unlocking is stored, not derived. `save.unlocked` is an explicit map of
+level index to open, written the moment a level is entered, and `maxUnlocked`
+records the highest index ever reached. A migration pass rebuilds the map from
+the star table for saves created before it existed. Level 1 is always open.
 
 ---
 
 ## Internationalisation
 
-The interface ships in Arabic and English. Arabic is the default.
+The interface ships in Arabic and English, with Arabic as the default.
 
 Switching language does not just swap strings. `applyI18n()` sets
-`document.documentElement.lang` and `.dir`, which flips the entire layout to
-RTL — the menu grid order, the sheet headers, the level grid, the padding
-sides, the sheen animation on the primary button. The font stack also
-changes: Cairo for Arabic, Outfit for English.
+`document.documentElement.lang` and `.dir`, which flips the whole layout to RTL —
+the menu grid order, the sheet headers, the level grid, the padding sides, the
+sheen on the primary button. The font stack changes too: Cairo for Arabic, Outfit
+for English.
 
-Two details are deliberately exempt from the direction flip:
+Two details are deliberately exempt from the flip:
 
-- **The touch pads.** The movement pad is always physically on the left and
-  the jump button always on the right, in both languages, because muscle
-  memory should not depend on the selected language.
+- **The touch pads.** Movement is always physically on the left and jump always
+  on the right, in both languages, because muscle memory should not depend on the
+  selected language.
 - **The arrow glyphs.** Left is always left.
 
 ---
 
 ## Responsive Behaviour
 
-- **Portrait phones.** The entire stage is rotated 90° with a CSS transform
-  so the game is always presented in landscape. The canvas sizing logic
-  accounts for this by swapping the viewport width and height.
-- **Continuous scaling.** Every size in the interface uses `clamp()` with
-  viewport-relative units, so nothing snaps between breakpoints.
-- **Short screens.** Dedicated media queries shrink the modal chrome, the
-  star row and the button padding so the action buttons never fall below the
-  fold. Overlays are content-sized and never scrollable — a modal that
-  requires scrolling to find its own buttons is a broken modal.
+- **Portrait phones.** The whole stage is rotated 90° with a CSS transform so the
+  game is always presented in landscape. The canvas sizing logic accounts for it
+  by swapping the viewport width and height, and measures the stage's own rect
+  rather than the window.
+- **Continuous scaling.** Every size uses `clamp()` with viewport-relative units,
+  so nothing snaps between breakpoints.
+- **Short screens.** Dedicated media queries shrink the modal chrome, the star
+  row and the button padding so the action buttons never fall below the fold.
+  Overlays are content-sized and never scrollable — a modal that needs scrolling
+  to reach its own buttons is a broken modal.
 - **Safe areas.** Touch pads respect `env(safe-area-inset-*)` for notched
   devices.
-- **Reduced motion.** `prefers-reduced-motion` disables all animation and
-  removes the rotating lamp rays.
+- **Reduced motion.** `prefers-reduced-motion` disables animation and removes
+  the rotating lamp rays.
+- **Resize that lands.** The canvas re-fits on the next frame, then again after
+  the transition settles, then once more as a safety pass, and reacts to
+  `visualViewport` changes that `window.resize` misses when a mobile toolbar
+  hides.
 
 ---
 
 ## Performance Notes
 
-The render loop was written with allocation pressure in mind, because at
-60 fps every per-frame allocation compounds.
+The renderer was written with allocation pressure in mind, because at 60 fps
+every per-frame allocation compounds.
 
-- **Cached light sprites.** Every radial gradient that does not change shape
-  — the lantern hole, the warm tint, gem glow, flask glow, checkpoint glow,
-  goal glow, player halo — is rasterised once into a small offscreen canvas
-  and then blitted with `drawImage`. A dozen gems on screen used to cost a
-  dozen gradient allocations per frame; now it costs a dozen blits.
-- **Batched stars.** The starfield is quantised into four brightness buckets
-  and drawn as four paths instead of eighty individual fills.
-- **Batched motes.** All ambient dust particles are drawn in a single path.
+- **Cached light sprites.** Every radial gradient that never changes shape — the
+  lantern hole, the warm tint, gem glow, flask glow, checkpoint glow, goal glow,
+  player halo — is rasterised once into a small offscreen canvas and blitted with
+  `drawImage`.
+- **Batched stars.** The starfield is quantised into four brightness buckets and
+  drawn as four paths instead of eighty individual fills.
+- **Batched motes.** All ambient dust is drawn in a single path.
 - **Deterministic embers.** Ember positions are a pure function of time and
-  index, so there is no particle array to maintain and no garbage.
-- **View culling.** Platforms, hazards, gems and flasks outside the camera
-  window are skipped entirely. Light holes in the darkness pass are only
-  punched for objects near the camera.
+  index, so there is no particle array and no garbage.
+- **View culling.** Platforms, hazards, gems and flasks outside the camera window
+  are skipped entirely, and light holes are only punched for objects near the
+  camera.
 - **HUD caching.** DOM writes are skipped when the value has not changed.
-- **Device pixel ratio cap.** DPR is clamped to 2, which keeps the backing
-  store reasonable on high-density phone screens.
-- **Effect quality setting.** The low setting halves the particle count.
+- **Device pixel ratio cap.** DPR is clamped to 2, which keeps the backing store
+  reasonable on high-density screens.
+- **Effect quality setting.** The low setting halves the particle count and skips
+  bloom, grain and grade entirely.
+- **Bloom on a budget.** The frame is sampled at one sixth of its size and the
+  result rebuilt on every other frame; a one-frame-old blur is invisible, and it
+  halves the cost of the most expensive pass in the renderer.
+- **Adaptive post stack.** The loop measures its own frame time. If the average
+  passes 23 ms the post stack disables itself for the rest of the session and the
+  game returns to plain, sharp rendering.
+- **Palette-driven drawing.** Every material colour is read from `W.pal` at draw
+  time instead of being hard-coded per renderer.
 
 ---
 
@@ -668,7 +704,7 @@ The render loop was written with allocation pressure in mind, because at
 - Every interactive control is a real `<button>` element.
 - Overlays use `role="dialog"` or `role="alertdialog"` with `aria-modal`,
   `aria-labelledby` and `aria-describedby`.
-- The hearts row is `aria-live="polite"` so life loss is announced.
+- The hearts row is `aria-live="polite"`, so life loss is announced.
 - The tutorial card is `role="status"` with `aria-live="polite"` and
   `aria-atomic="true"`.
 - Touch buttons carry `aria-label` text.
@@ -683,49 +719,51 @@ The render loop was written with allocation pressure in mind, because at
 
 - `game.js` — physics: `GRAV`, `MAXFALL`, `SPEED`, `ACC`, `FRIC`, `JUMPV`,
   `JUMPV2`, `MAX_JUMPS`, `MAX_HEARTS`.
-- `levels.js` — geometry and generation: `TUNE` (ground height, gaps,
-  headroom, checkpoint spacing, oil spacing, plus one block per hazard
-  family), `QUOTA` (the guaranteed minimum of each family), and `SEGMENTS`
-  (per-template minimum width and unlock threshold).
+- `levels.js` — geometry and generation: `TUNE`, `QUOTA`, `SEGMENTS`,
+  `WORLD_BIAS`, `PALETTE`.
 
-**Tuning a hazard family.** Each of the four new families owns a block in
-`TUNE`:
+**Tuning a hazard family.** Each family owns a block in `TUNE`:
 
 | Block | Constants |
 | --- | --- |
 | `SAW_*` | `SAW_R`, `SAW_DIST`, `SAW_SPEED` |
 | `NAIL_*` | `NAIL_H`, `NAIL_STEP` |
-| `RISER_*` | `RISER_H`, `RISER_SPEED` |
 | `CRUSH_*` | `CRUSH_H`, `CRUSH_DROP`, `CRUSH_SPEED` |
+| `LAVA_*` | `LAVA_DROP`, `LAVA_DEPTH` |
 | `FUSE_*` | `FUSE_MIN`, `FUSE_MAX`, `CRUMB_RESPAWN` |
+| float | `MIN_FLOAT_CLEAR` — the air a floating stone must leave under itself |
+| checkpoint | `CP_SPACING`, `CP_SAFE_FWD`, `CP_SAFE_BACK` |
 
-Raising `FUSE_MIN` makes every fragile surface in the game more forgiving at
-once; lowering `CRUSH_SPEED` slows every falling stone. No segment code needs
-to change.
+Raising `FUSE_MIN` makes every fragile surface more forgiving at once; lowering
+`CRUSH_SPEED` slows every falling stone. No segment code needs to change.
 
-**Adding a world** means pushing an entry into `WORLDS` in `levels.js` with
-its palette and `archStyle`, then adding a matching `archStyle` branch in
-`drawSky`, `drawArches`, `drawMidLayer`, `drawPlat` and `drawCeil` in
-`game.js`.
+**World character** is tuned in `WORLD_BIAS` — one weight table per world, read
+by the segment picker.
 
-**Adding a level** means adding a `LEVEL_META` entry. The builder handles the
-rest. Changing `LEVEL_META` order changes the difficulty ramp, since the
-index drives both width and difficulty band.
+**Colour** is tuned in `PALETTE` — one ramp per world, attached to the world so
+every renderer reads it.
+
+**Adding a world** means pushing an entry into `WORLDS` with its palette entry
+and `archStyle`, then adding a matching `archStyle` branch in `drawSky`,
+`drawArches`, `drawMidLayer` and `drawPlatBody`.
+
+**Adding a level** means adding a `LEVEL_META` entry; the builder handles the
+rest. Reordering `LEVEL_META` changes the difficulty ramp, because the index
+drives both width and difficulty band.
 
 **Adding a segment template** means writing a function with the signature
 `(B, x0, w, diff, rnd)` that returns the x position where it ends, then
 registering it in `SEGMENTS` with a `minW` and an `unlockAt`.
 
-**Changing the palette** is done through the CSS custom properties at the top
-of `styles.css` for the interface, and through the `WORLDS` entries for the
-game world.
+**Changing interface colours** is done through the CSS custom properties at the
+top of `styles.css`; game-world colour lives in `PALETTE` in `levels.js`.
 
 ---
 
 ## Browser Support
 
-Requires a browser with Canvas 2D, Web Audio, Pointer Events, `ResizeObserver`
-support, CSS `clamp()`, `aspect-ratio` and `dvh` units.
+Requires Canvas 2D, Web Audio, Pointer Events, `ResizeObserver`, CSS `clamp()`,
+`aspect-ratio` and `dvh` units.
 
 | Browser | Status |
 | --- | --- |

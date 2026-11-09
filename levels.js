@@ -61,6 +61,65 @@ const WORLDS = [
 ];
 
 /* =========================================================
+   PALETTE — ONE COLOUR RAMP PER WORLD, AND NOTHING ELSE.
+   ---------------------------------------------------------
+   Every world already carried an `accent`, but the renderers in
+   game.js still held hard-coded hexes: the lava was `#ffb347` in
+   every world, the saw was the same grey, the spikes the same
+   red. That is why five worlds read as one world with five
+   tints — the large surfaces followed the palette and every
+   small one ignored it.
+
+   This table is now the ONLY source of colour for geometry:
+
+     stone  · [lit top, body, underside] for every solid slab
+     rim    · the single lit edge every stone gets (top-left)
+     shadow · the ground shadow under a stone — never pure black
+     haze   · the air between the parallax layers
+     spike  · [dark base, lit face, specular tip] for danger metal
+     steel  · [dark, mid, light] for saws and nails
+
+   All of them stay inside the world's own hue, so a world can be
+   recognised from a single frame of its floor.
+   ========================================================= */
+const PALETTE = {
+  clay: {
+    stone : ['#a06a34','#6b3f1d','#2a1609'],
+    rim   : '#ffcf95', shadow:'#160b04', haze:'#2a1408',
+    spike : ['#3a1512','#a4614a','#fff0d8'],
+    steel : ['#1d2129','#4a4f5c','#b9bfcc']
+  },
+  mosque: {
+    stone : ['#3f8b82','#1f4d48','#08201e'],
+    rim   : '#b8fff2', shadow:'#04120f', haze:'#0a2624',
+    spike : ['#123330','#5f9e97','#d9fff8'],
+    steel : ['#1b2426','#46585a','#aebfc1']
+  },
+  market: {
+    stone : ['#8e3a6c','#5a1e42','#20081a'],
+    rim   : '#ffc2e4', shadow:'#12030c', haze:'#2a0a1e',
+    spike : ['#3a1030','#a05b7e','#ffe0ef'],
+    steel : ['#241a22','#584352','#c6b0bf']
+  },
+  ruins: {
+    stone : ['#4b4480','#2a2549','#0d0b1a'],
+    rim   : '#d9d0ff', shadow:'#060512', haze:'#141033',
+    spike : ['#241a3a','#6a5f9e','#e6e0ff'],
+    steel : ['#1b1b28','#464a5e','#b6bacd']
+  },
+  tower: {
+    stone : ['#8c4214','#4a2208','#1a0802'],
+    rim   : '#ffd0a0', shadow:'#0a0201', haze:'#1f0803',
+    spike : ['#3a1408','#a0622e','#ffd9a8'],
+    steel : ['#20232a','#4c525c','#c2c8d2']
+  }
+};
+
+/* attach the ramp to each world once, so game.js can read W.pal and
+   never has to know the table exists */
+WORLDS.forEach(function(w){ w.pal = PALETTE[w.id] || null; });
+
+/* =========================================================
    TUNING — every magic number lives here.
    ---------------------------------------------------------
    The four new hazard families each get their own block so a
@@ -68,8 +127,7 @@ const WORLDS = [
 
      SAW     · a spinning blade that patrols a path
      NAIL    · a dense row of short metal spikes (floor or ceiling)
-     RISER   · a stone that erupts out of the floor, then crumbles
-     CRUSHER · a stone that drops from the ceiling when you pass
+           CRUSHER · a stone that drops from the ceiling when you pass
      CRUMB   · the fragile platform, now with a variable fuse
 
    FAIRNESS FLOOR
@@ -118,9 +176,6 @@ const TUNE = {
   NAIL_H       : 15,     /* short and dense — a different read  */
   NAIL_STEP    : 13,     /* horizontal spacing between points   */
 
-  /* ---- riser (stone erupts from the floor) ------------------ */
-  RISER_H      : 20,     /* how far the stone rises             */
-  RISER_SPEED  : 2.2,    /* seconds to reach full height        */
 
   /* ---- crusher (stone drops from the ceiling) --------------- */
   CRUSH_H      : 26,
@@ -165,16 +220,32 @@ function Builder(){
   /* ---- new hazard families ---- */
   this.saws = [];
   this.nails = [];
-  this.risers = [];
   this.crushers = [];
   this.cpCandidates = [];
   this.lastGroundEnd = 0;
 }
 
 /* ---- collision helpers ---- */
-Builder.prototype._hitBox = function(x,y,w,h,pad){
+Builder.prototype._hitBox = function(x,y,w,h,pad,skipTop){
   pad = pad || 0;
   const test = function(o){
+    /* =========================================================
+       `skipTop` — THE BUG THAT DELETED EVERY GROUND HAZARD
+       ---------------------------------------------------------
+       A spike, a fire and a floor nail all validate themselves with
+       a box that shares its BOTTOM edge with the surface they stand
+       on. With a 14-unit pad the test therefore ALWAYS overlapped
+       the floor slab itself, so `_hitBox` answered "occupied" for
+       the one piece of geometry a ground hazard is meant to sit on
+       — and every spike, every fire and every nail row in the game
+       was silently refused, on all 25 levels.
+
+       `skipTop` is the y of that surface: a block whose top sits
+       within 4 units of it is the ground, not an obstruction.
+       Everything else is tested exactly as before, and every caller
+       that does not pass it behaves unchanged.
+       ========================================================= */
+    if(skipTop !== undefined && Math.abs(o.y - skipTop) < 4) return false;
     return x < o.x+o.w+pad && x+w > o.x-pad && y < o.y+o.h+pad && y+h > o.y-pad;
   };
   let i, p;
@@ -184,7 +255,6 @@ Builder.prototype._hitBox = function(x,y,w,h,pad){
   for(i=0;i<this.movers.length;i++){ p=this.movers[i]; if(test({x:p.x,y:p.y,w:p.w,h:p.h})) return true; }
   /* the new families reserve their own footprint too, otherwise a
      later platform could be dropped straight through a saw's path */
-  for(i=0;i<this.risers.length;i++){ p=this.risers[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
   for(i=0;i<this.crushers.length;i++){ p=this.crushers[i]; if(test({x:p[0],y:p[1],w:p[2],h:p[3]})) return true; }
   return false;
 };
@@ -528,6 +598,19 @@ Builder.prototype.saw = function(x, y, r, axis, dist, speed){
   dist = dist || TUNE.SAW_DIST;
   speed = speed || TUNE.SAW_SPEED;
 
+  /* =========================================================
+     THE BLADE MUST NOT BE ON TOP OF THE PLAYER AT SPAWN
+     ---------------------------------------------------------
+     A saw's corridor is the only hazard footprint that is not
+     anchored to the floor, so it is the one that could reach the
+     spawn column. The spawn zone is enforced on the WHOLE sweep,
+     not just the resting centre: a blade that rests at x = 900 but
+     travels 120 units left still reaches x = 780.
+     ========================================================= */
+  const reachL = axis === 'x' ? x - dist - r : x - r;
+  const reachR = axis === 'x' ? x + dist + r : x + r;
+  if(this.inSpawnZone(reachL, reachR - reachL)) return false;
+
   /* the whole corridor must be free of solid geometry */
   const pad = r + 12;
   const cx0 = axis === 'y' ? x - pad : x - dist - pad;
@@ -559,61 +642,40 @@ Builder.prototype.saw = function(x, y, r, axis, dist, speed){
 Builder.prototype.nail = function(x, w, dir){
   w = w || 60;
   dir = dir === -1 ? -1 : 1;
+  if(this.inSpawnZone(x, w)) return false;
   const cx = x + w/2;
 
   if(dir === 1){
     /* floor nails — need real ground and headroom */
     const g = this.groundUnder(cx, 300);
     if(!g) return false;
-    if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM + TUNE.NAIL_H) return false;
-    if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM + TUNE.NAIL_H)) return false;
-    if(this._hitBox(x, g[1]-TUNE.NAIL_H, w, TUNE.NAIL_H, 14)) return false;
+    /* same rule as spikes and fires: the whole row, one surface */
+    if(!this._flatUnder(x, w, g[1])) return false;
+    if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM) return false;
+    if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM)) return false;
+    if(this._hitBox(x, g[1]-TUNE.NAIL_H, w, TUNE.NAIL_H, 14, g[1])) return false;
     this.nails.push([Math.round(x), Math.round(g[1]-TUNE.NAIL_H), Math.round(w), TUNE.NAIL_H, 1]);
     return true;
   }
 
   /* ceiling nails — must hang from a real ceiling block */
-  let best = null;
+  let best = null, bestTop = null;
   for(let i=0;i<this.ceils.length;i++){
     const c = this.ceils[i];
     if(cx < c[0] || cx > c[0]+c[2]) continue;
     const bottom = c[1] + c[3];
-    if(!best || bottom > best) best = bottom;
+    if(!best || bottom > best){ best = bottom; bestTop = c[1]; }
   }
   if(best === null) return false;
   /* the ceiling must be low enough that the nails are a real threat */
   if(best > TUNE.GROUND_Y - TUNE.MIN_HEADROOM) return false;
-  if(this._hitBox(x, best, w, TUNE.NAIL_H, 14)) return false;
+  /* skipTop = the slab's own top, so the slab the nails hang from is
+     not mistaken for an obstruction */
+  if(this._hitBox(x, best, w, TUNE.NAIL_H, 14, bestTop)) return false;
   this.nails.push([Math.round(x), Math.round(best), Math.round(w), TUNE.NAIL_H, -1]);
   return true;
 };
 
-/* =========================================================
-   RISER — a stone that erupts out of the floor, then crumbles.
-   ---------------------------------------------------------
-   This is the "حجر من الأرض يتفتت عند الصعود عليه" the design
-   calls for. It is authored as a SOLID surface sitting at its
-   resting (raised) height; the engine starts it buried and
-   animates it up when the player is close.
-
-   crumbs-style bookkeeping, but the fuse only starts once the
-   player is actually standing on it.
-
-   risers: [x, y, w, h, fuse, respawn]
-   ========================================================= */
-Builder.prototype.riser = function(x, y, w, fuse, respawn){
-  w = w || 80;
-  if(y < 120) return false;
-  if(this._hitBox(x, y, w, TUNE.RISER_H, 10)) return false;
-  const f = Math.max(TUNE.FUSE_MIN,
-              Math.min(TUNE.FUSE_MAX, fuse === undefined ? 0.6 : fuse));
-  this.risers.push([
-    Math.round(x), Math.round(y), Math.round(w), TUNE.RISER_H,
-    Math.round(f * 100) / 100,
-    respawn ? 1 : 0
-  ]);
-  return true;
-};
 
 /* =========================================================
    CRUSHER — a stone that drops from the ceiling.
@@ -652,6 +714,7 @@ Builder.prototype.crusher = function(x, y, w, drop, speed){
   w = w || 70;
   drop = drop || TUNE.CRUSH_DROP;
   if(y < 70) return false;
+  if(this.inSpawnZone(x, w)) return false;
 
   /* ---- 1 · find a ceiling that actually covers this stone ---- */
   let anchor = null;
@@ -708,60 +771,145 @@ Builder.prototype.mover = function(x, y, w, axis, dist, speed){
      2. it leaves MIN_HEADROOM of clear air above it
      3. it does not overlap existing geometry
      4. nothing is suspended directly above it
-   Rule 4 is new. Without it a floating platform could sit
-   86 units over a fire, so the player would drop off it and
-   land on flames with no way to see the danger coming.
-   `_clearAbove` checks every platform and ceiling that hangs
-   over the hazard's footprint.
+
+   Rule 4 exists because a floating platform could otherwise sit
+   86 units over a fire: the player drops off it and lands on
+   flames with no way to see the danger coming.
+   ========================================================= */
+
+/* =========================================================
+   HAZARD CLEARANCE — THE BUG THAT MADE EVERY GROUND HAZARD VANISH
+   ---------------------------------------------------------
+   Every ground hazard (spike, fire, nail) validated itself with
+   `_clearAbove(x, w, topY, need)`, which asks: "is anything
+   hanging over this footprint whose underside is above the hazard
+   but below the required clearance?"
+
+   It walks `this.plats` — and `this.plats` contains the FLOOR
+   itself. `plat()` raises every floating stone to
+   `GROUND_Y - MIN_FLOAT_CLEAR - h` = 358, so its underside sits at
+   380 — 120 units above the ground line. The old window
+   (`bottom > topY - need`) counted that stone as "suspended over"
+   the hazard standing on the floor, and refused the placement.
+
+   Combined with a headroom rule that demanded
+   `MIN_HEADROOM + SPIKE_H`, that rejected EVERY spike, EVERY fire
+   and EVERY nail in the game — while saws (which never call this
+   function) were placed normally. The level dump showed exactly
+   that: 0 spikes, 0 fires, 0 nails on all 25 levels.
+
+   THE FIX
+   -------
+   1. only geometry whose underside is genuinely ABOVE the hazard
+      counts — a stone higher up the level is not "over" a 22-unit
+      spike
+   2. the surface the hazard is standing on is skipped explicitly
+   3. the caller asks for MIN_HEADROOM (room to jump it), not
+      MIN_HEADROOM plus the hazard's own height
    ========================================================= */
 Builder.prototype._clearAbove = function(x, w, topY, need){
   const x2 = x + w;
-  for(let i=0;i<this.plats.length;i++){
+  const counts = function(px, pw, pBottom){
+    if(px >= x2 || px + pw <= x) return false;      /* no x overlap */
+    if(pBottom > topY) return false;                /* not above us   */
+    if(pBottom <= topY - need) return false;        /* far enough up  */
+    return true;
+  };
+  let i;
+  for(i=0;i<this.plats.length;i++){
     const p = this.plats[i];
-    const bottom = p[1] + p[3];
-    if(p[0] < x2 && p[0]+p[2] > x) {
-      /* anything whose underside is above the hazard and below the
-         required clearance is a problem */
-      if(bottom <= topY && bottom > topY - need) return false;
-    }
+    /* the surface the hazard is standing on is never "above" it */
+    if(Math.abs(p[1] - topY) < 4) continue;
+    if(counts(p[0], p[2], p[1] + p[3])) return false;
   }
-  for(let i=0;i<this.ceils.length;i++){
+  for(i=0;i<this.ceils.length;i++){
     const c = this.ceils[i];
-    const bottom = c[1] + c[3];
-    if(c[0] < x2 && c[0]+c[2] > x){
-      if(bottom <= topY && bottom > topY - need) return false;
-    }
+    if(counts(c[0], c[2], c[1] + c[3])) return false;
   }
-  for(let i=0;i<this.crumbs.length;i++){
+  for(i=0;i<this.crumbs.length;i++){
     const c = this.crumbs[i];
-    const bottom = c[1] + c[3];
-    if(c[0] < x2 && c[0]+c[2] > x){
-      if(bottom <= topY && bottom > topY - need) return false;
-    }
+    if(counts(c[0], c[2], c[1] + c[3])) return false;
   }
   return true;
 };
 
+/* =========================================================
+   SPAWN CLEAR ZONE — no hazard may sit on the player's doorstep.
+   ---------------------------------------------------------
+   A top-up pass used to scan from x = 400, so on a level whose
+   first segment is a `run` the first hazard could land 320 units
+   from the spawn at x = 80 — under a second of walking, with the
+   camera still settling. The player died before taking a single
+   deliberate step.
+
+   Nothing lethal is allowed inside the first CLEAR units, and
+   nothing lethal may overlap the spawn column. Every hazard
+   placement checks this, so no segment template and no top-up can
+   break it.
+   ========================================================= */
+Builder.prototype.inSpawnZone = function(x, w){
+  w = w || 0;
+  const SPAWN_X = 80;
+  const CLEAR   = 700;
+  return (x + w) < SPAWN_X + CLEAR;
+};
+
+/* =========================================================
+   FLAT FOOTPRINT GUARD
+   ---------------------------------------------------------
+   `groundUnder(cx, 300)` only ever asked about the hazard's
+   CENTRE. A 62-wide spike row on a 40-wide stone therefore passed
+   validation and was drawn with half of itself hanging in the air
+   — which is exactly what the screenshots show.
+
+   A hazard needs the WHOLE footprint on one continuous surface at
+   one continuous height. Every 6 units is probed, and the far edge
+   is probed explicitly, because a row that ends a single unit past
+   the stone still reads as broken.
+   ========================================================= */
+Builder.prototype._flatUnder = function(x, w, topY){
+  const covers = function(px){
+    for(let i=0;i<this.plats.length;i++){
+      const p = this.plats[i];
+      if(Math.abs(p[1] - topY) > 2) continue;
+      if(px >= p[0] - 1 && px <= p[0] + p[2] + 1) return true;
+    }
+    return false;
+  }.bind(this);
+
+  const step = 6;
+  for(let px = x; px < x + w; px += step){
+    if(!covers(px)) return false;
+  }
+  return covers(x + w);
+};
+
 Builder.prototype.spike = function(x, w){
   w = w || 55;
+  if(this.inSpawnZone(x, w)) return false;
   const cx = x + w/2;
   const g = this.groundUnder(cx, 300);
   if(!g) return false;
-  if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM + TUNE.SPIKE_H) return false;
-  if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM + TUNE.SPIKE_H)) return false;
-  if(this._hitBox(x, g[1]-TUNE.SPIKE_H, w, TUNE.SPIKE_H, 14)) return false;
+  /* the whole row must stand on ONE surface — see _flatUnder */
+  if(!this._flatUnder(x, w, g[1])) return false;
+  if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM) return false;
+  if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM)) return false;
+  if(this._hitBox(x, g[1]-TUNE.SPIKE_H, w, TUNE.SPIKE_H, 14, g[1])) return false;
   this.spikes.push([Math.round(x), Math.round(g[1]-TUNE.SPIKE_H), Math.round(w)]);
   return true;
 };
 
 Builder.prototype.fire = function(x, w, speed){
   w = w || 60;
+  if(this.inSpawnZone(x, w)) return false;
   const cx = x + w/2;
   const g = this.groundUnder(cx, 300);
   if(!g) return false;
-  if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM + 34) return false;
-  if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM + 34)) return false;
-  if(this._hitBox(x, g[1]-34, w, 34, 14)) return false;
+  /* a flame standing half over an edge is a flame in mid-air */
+  if(!this._flatUnder(x, w, g[1])) return false;
+  if(this.headroom(cx, g[1]) < TUNE.MIN_HEADROOM) return false;
+  if(!this._clearAbove(x, w, g[1], TUNE.MIN_HEADROOM)) return false;
+  if(this._hitBox(x, g[1]-34, w, 34, 14, g[1])) return false;
   this.fires.push([Math.round(x), Math.round(g[1]-34), Math.round(w), 34, speed||1.6]);
   return true;
 };
@@ -800,14 +948,57 @@ Builder.prototype.lava = function(x, w){
   const top = g + TUNE.LAVA_DROP;
   const h   = TUNE.LAVA_DEPTH;
 
+  /* =========================================================
+     THE POOL MUST FILL ITS OWN CHASM
+     ---------------------------------------------------------
+     A pool used to be poured at exactly the width it was asked for.
+     That was fine for `segLava`, which knows its chasm, but the
+     top-up pass asks for a flat 130 units wherever it finds no
+     floor — so inside a 600-wide chasm it produced a slab of lava
+     sitting in the middle of a black hole. That is the "the volcano
+     is a box in the gap" everybody sees.
+
+     The width is now MEASURED, not requested: walk out from the
+     requested centre until the floor starts on each side, and pour
+     the whole span. A pool is a hole in the earth — the hole
+     decides how big it is.
+     ========================================================= */
+  const self = this;
+  const solidFloorAt = function(px){
+    for(let i=0;i<self.plats.length;i++){
+      const p = self.plats[i];
+      if(Math.abs(p[1] - g) > 2) continue;
+      if(px >= p[0] && px <= p[0] + p[2]) return true;
+    }
+    return false;
+  };
+
+  const step     = 8;
+  const guardMax = 400;              /* 3200 units — past any chasm */
+  let L = x, R = x + w, guard = 0;
+
+  while(L > 0 && guard++ < guardMax && !solidFloorAt(L - step)) L -= step;
+  guard = 0;
+  while(guard++ < guardMax && !solidFloorAt(R + step)) R += step;
+
+  const px0 = Math.max(0, L);
+  const pw  = R - px0;
+  if(pw < 90) return false;
+
+  /* never pour a second pool into water that is already there */
+  for(let i=0;i<this.lavas.length;i++){
+    const o = this.lavas[i];
+    if(px0 < o[0] + o[2] && px0 + pw > o[0]) return false;
+  }
+
   /* the pit mouth must be open. Inset by 10 on each side so the solid
      banks that bound the pit are not counted as obstructions. */
   const inset = 10;
-  if(this._hitBox(x + inset, g - 20, w - inset*2,
+  if(this._hitBox(px0 + inset, g - 20, pw - inset*2,
                   TUNE.LAVA_DROP + 46, 0)) return false;
 
   this.lavas.push([
-    Math.round(x), Math.round(top), Math.round(w), Math.round(h), g
+    Math.round(px0), Math.round(top), Math.round(pw), Math.round(h), g
   ]);
   return true;
 };
@@ -853,7 +1044,6 @@ Builder.prototype._nearHazard = function(x, w, pad){
   for(i=0;i<this.fires.length;i++)    if(overlaps(this.fires[i]))    return true;
   for(i=0;i<this.lavas.length;i++)    if(overlaps(this.lavas[i]))    return true;
   for(i=0;i<this.nails.length;i++)    if(overlaps(this.nails[i]))    return true;
-  for(i=0;i<this.risers.length;i++)   if(overlaps(this.risers[i]))   return true;
   for(i=0;i<this.crushers.length;i++) if(overlaps(this.crushers[i])) return true;
   for(i=0;i<this.saws.length;i++){
     const s = this.saws[i];
@@ -1347,9 +1537,18 @@ function segSawRun(B, x0, w, diff, rnd){
   for(let i=0;i<count;i++){
     const sx = x0 + inset + gap * i;
 
-    /* the axis is a function of difficulty, not of a coin flip:
-       low levels are horizontal only, high levels get verticals */
-    const axis = (diff > 0.55 && i % 3 === 2) ? 'y' : 'x';
+    /* =========================================================
+       NO VERTICAL BLADE IN THE OPENING STRETCH
+       ---------------------------------------------------------
+       A vertical blade drops from above. If one of them patrols
+       the first stretch of a level, the player meets it from
+       underneath — they are walking, it arrives in their head, and
+       there was nothing on screen to read. The first blade of any
+       run is therefore ALWAYS horizontal, so the player sees it
+       sliding along the floor before they see one that falls.
+       ========================================================= */
+    const firstBlade = (i === 0);
+    const axis = (!firstBlade && diff > 0.55 && i % 3 === 2) ? 'y' : 'x';
 
     /* travel and speed scale cleanly with difficulty */
     const dist = axis === 'x'
@@ -1427,42 +1626,6 @@ function segNailGauntlet(B, x0, w, diff, rnd){
   return x0 + w;
 }
 
-/* =========================================================
-   11 · RISE & FALL — stones that erupt from the floor.
-   ---------------------------------------------------------
-   A chain of risers across a void. Each one rises when you get
-   close and crumbles a moment after you land on it, so the only
-   way across is to keep moving. The fuse gets shorter with
-   difficulty but never drops below FUSE_MIN.
-   ========================================================= */
-function segRiseFall(B, x0, w, diff, rnd){
-  B.floor(x0, 150);
-  B.floor(x0 + w - 150, 150);
-
-  const count = 3 + Math.floor(diff * 2);
-  const span  = w - 300;
-  const step  = span / count;
-
-  /* same rule as the fragile chain: the fuse is a function of
-     difficulty, the height is a fixed wave, and `respawn`
-     alternates. Nothing here is a coin flip. */
-  const chainFuse = 0.90 - diff * 0.50;          /* 0.90 .. 0.40 */
-
-  for(let i=0;i<count;i++){
-    const rx = x0 + 150 + i * step;
-    /* the stones alternate height so the route reads as a wave */
-    const ry = 430 - Math.round(Math.sin(i * 0.9) * 45);
-    const respawn = (i % 2 === 1);
-    if(B.riser(rx, ry, 78, chainFuse, respawn)){
-      if(i % 2 === 0) B.gem(rx + 39, ry - 52);
-    }
-  }
-
-  /* a hazard on the far bank so the landing is not free */
-  if(diff > 0.55) B.spike(x0 + w - 120, 52);
-
-  return x0 + w;
-}
 
 /* =========================================================
    12 · CRUSHER HALL — stones that drop from the ceiling.
@@ -1577,13 +1740,11 @@ function segGauntlet(B, x0, w, diff, rnd){
   /* 2 · nail row at 0.28 */
   B.nail(x0 + w * 0.28, 50 + diff * 30, 1);
 
-  /* 3 · saw at 0.40 */
+  /* 3 · saw at 0.40 — a vertical blade, but never the first thing
+         the player meets in the run (see segSawRun) */
   B.saw(x0 + w * 0.40, sawY, TUNE.SAW_R, 'y',
         60 + diff * 40, 1.3 + diff * 1.0);
 
-  /* 4 · riser over a short void at 0.55 */
-  B.riser(x0 + w * 0.55, 430,
-          Math.round(90 - diff * 26), 0.95 - diff * 0.5, true);
 
   /* 5 · crusher, with its own slab, at 0.70 */
   const cx = x0 + w * 0.70;
@@ -1638,6 +1799,77 @@ function segGauntlet(B, x0, w, diff, rnd){
    meets each mechanic early, in a survivable form, and the same
    mechanic gets crueller as they get better.
    ========================================================= */
+
+/* =========================================================
+   SET-PIECE A · THE FRAGILE BRIDGE
+   ---------------------------------------------------------
+   Hand-authored, identical on every seed: a chain of fragile
+   stones with ONE safe island in the middle and a slow blade
+   sweeping above it. The player has to decide where to breathe,
+   which is a thing no generated segment ever asks for.
+   ========================================================= */
+function segBridge(B, x0, w, diff, rnd){
+  B.floor(x0, 160);
+  B.floor(x0 + w - 160, 160);
+
+  const span   = Math.max(240, w - 320);
+  const crumbW = 70;
+  /* the chain is sized to the span, and the spacing is always wider
+     than a stone plus its validation pad — otherwise every other
+     stone is silently refused and the "bridge" becomes a plain gap */
+  const count  = Math.max(3, Math.min(7, Math.floor((span - 40) / (crumbW + 34))));
+  const step   = span / (count + 1);
+  const Y      = 430;
+  const mid    = Math.floor(count / 2);
+
+  for(let i = 0; i < count; i++){
+    const cx = x0 + 160 + step * (i + 1) - crumbW / 2;
+
+    if(i === mid){
+      if(B.plat(cx - 24, Y, crumbW + 52, 22)) B.gem(cx + crumbW/2, Y - 46);
+      continue;
+    }
+
+    B.crumb(cx, Y, crumbW, 0.52, (i % 2 === 1));
+    if(i === 1 || i === count - 2) B.gem(cx + crumbW/2, Y - 52);
+  }
+
+  /* one blade over the whole crossing — high enough to read, low
+     enough to matter when you jump */
+  B.saw(x0 + w * 0.5, 320, TUNE.SAW_R, 'x', 90, 0.9 + diff * 0.5);
+
+  return x0 + w;
+}
+
+/* =========================================================
+   SET-PIECE B · THE GATE
+   ---------------------------------------------------------
+   A slab low enough to stop a full jump, a floor spike beneath it,
+   and no way round either. Two of these in a row teach the player
+   the difference between jumping OVER something and passing
+   UNDER it — the one lesson a flat corridor can never teach.
+   ========================================================= */
+function segGate(B, x0, w, diff, rnd){
+  B.floor(x0, w);
+
+  const gates = 2 + Math.floor(diff * 2);
+  const span  = Math.max(200, w - 380);
+  const step  = gates > 1 ? span / (gates - 1) : 0;
+  const gateW = 170;
+
+  for(let i = 0; i < gates; i++){
+    const gx = x0 + 190 + step * i;
+
+    /* slab first, then the floor row under it — a jump that the low
+       ceiling turns into a scrape */
+    if(!B.ceil(gx, 236, gateW)) continue;
+    B.spike(gx + gateW * 0.5 - 26, 54 + diff * 14);
+  }
+
+  B.gem(x0 + w * 0.5, TUNE.GROUND_Y - 118);
+  return x0 + w;
+}
+
 const SEGMENTS = {
   run        : { fn:segRun,         minW:440, unlockAt:0.00 },
   gap        : { fn:segGap,         minW:540, unlockAt:0.00 },
@@ -1649,15 +1881,19 @@ const SEGMENTS = {
   mover      : { fn:segMover,       minW:580, unlockAt:0.15 },
   lava       : { fn:segLava,        minW:620, unlockAt:0.18 },
   crumble    : { fn:segCrumble,     minW:580, unlockAt:0.18 },
-  /* `rise` is deliberately absent. The erupting stone (riser) has
-     been replaced by the fragile stone above: same idea — a surface
-     that gives way under you — but the fragile stone is visible
-     from the start instead of erupting from the floor when you
-     approach, which the brief asked for. The engine support for
-     `risers` is untouched, so re-adding this line brings it back. */
+  /* `rise` is deliberately absent. The erupting stone (riser) is
+     not part of the game: a surface that gives way under you is
+     already covered by the fragile stone above, and the fragile
+     stone is visible from the start instead of erupting out of the
+     floor when you approach. The engine support for `risers` is
+     untouched, so re-adding this line brings it back. */
 
   crushers   : { fn:segCrusherHall, minW:640, unlockAt:0.25 },
-  gauntlet   : { fn:segGauntlet,    minW:700, unlockAt:0.30 }
+  gauntlet   : { fn:segGauntlet,    minW:700, unlockAt:0.30 },
+
+  /* ---- hand-authored set-pieces ---- */
+  bridge     : { fn:segBridge,      minW:720, unlockAt:0.10 },
+  gate       : { fn:segGate,        minW:700, unlockAt:0.16 }
 };
 
 /* =========================================================
@@ -1670,7 +1906,42 @@ const SEGMENTS = {
         mechanic instead of it being lost in the shuffle
    `run` and `gap` stay weighted up so a level always breathes.
    ========================================================= */
-function pickSegment(diff, rnd, last){
+/* =========================================================
+   WORLD SIGNATURE
+   ---------------------------------------------------------
+   `diff` says HOW HARD a level is. It never said WHAT KIND of
+   hard — so five worlds were five tints of one level. Each world
+   now leans on its own families, and the multipliers are gentle
+   enough that nothing is ever impossible, only characteristic.
+   ========================================================= */
+const WORLD_BIAS = [
+  /* 0 · CLAY HOUSE — learning: floor, gaps, fragile stones */
+  { run:1.6, gap:1.5, crumble:1.8, stairs:1.1, island:0.9,
+    nails:0.35, saws:0.35, crushers:0.20, mover:0.45, lava:0.40,
+    corridor:0.60, gauntlet:0.15, bridge:1.4, gate:0.5 },
+
+  /* 1 · OLD MOSQUE — indoors: low ceilings, nails, stairs */
+  { corridor:1.9, gate:1.7, nails:1.8, stairs:1.4, island:0.8,
+    run:0.9, gap:0.9, crumble:0.7, saws:0.7, mover:0.6, lava:0.4,
+    crushers:0.4, gauntlet:0.3, bridge:0.6 },
+
+  /* 2 · THE MARKET — things that move */
+  { mover:2.0, lava:1.7, gap:1.4, saws:0.9, island:0.9,
+    run:0.9, stairs:0.6, corridor:0.6, nails:0.7, crumble:0.8,
+    crushers:0.5, gauntlet:0.4, bridge:1.0, gate:0.8 },
+
+  /* 3 · RUINED COURT — things that fall */
+  { saws:1.9, crushers:1.9, crumble:1.4, bridge:1.3, gauntlet:1.0,
+    run:0.8, gap:0.9, stairs:0.5, island:0.7, nails:0.9,
+    mover:0.6, lava:0.6, corridor:0.7, gate:0.9 },
+
+  /* 4 · LANTERN TOWER — everything, at height, no rest */
+  { gauntlet:2.0, saws:1.5, crushers:1.4, mover:1.3, lava:1.2,
+    stairs:1.1, bridge:1.2, gate:1.2, crumble:1.0, nails:1.0,
+    corridor:0.9, run:0.6, gap:0.8, island:0.7 }
+];
+
+function pickSegment(diff, rnd, last, world){
   const pool = [];
   for(const k in SEGMENTS){
     const s = SEGMENTS[k];
@@ -1701,6 +1972,10 @@ function pickSegment(diff, rnd, last){
     if(k === 'nails' || k === 'saws') weight += 0.6;
     if(k === 'rise'  || k === 'crushers') weight += 0.5;
     if(k === 'gauntlet') weight += 0.9;
+
+    /* ---- the world's own signature ---- */
+    const bias = (WORLD_BIAS[world] || {})[k];
+    if(bias !== undefined) weight *= bias;
 
     /* a weight can never go negative — clamp before the draw */
     if(weight < 0.15) weight = 0.15;
@@ -1761,6 +2036,10 @@ function buildLevel(index){
      ========================================================= */
   const baseDiff = Math.min(0.98, 0.10 + Math.pow(index / 24, 1.35) * 0.88);
 
+  /* 25 levels, five per world, in order — so the world of a level is
+     its own index divided by five, and `pickSegment` can lean on it */
+  const worldIdx = Math.min(4, Math.floor(index / 5));
+
   let x = 0;
   let lastSeg = null;
   let segCount = 0;
@@ -1769,7 +2048,29 @@ function buildLevel(index){
     const progress = x / wd;
     const diff = Math.min(0.95, Math.max(0.05, baseDiff + (progress-0.5)*0.22));
 
-    const name = pickSegment(diff, rnd, lastSeg);
+    /* =========================================================
+       PACING — every fourth segment is a set-piece.
+       ---------------------------------------------------------
+       A weighted random draw gives you density, never rhythm: a
+       level is a soup with no shape and nothing to remember. One
+       authored moment in the middle of each stretch fixes that,
+       and it costs nothing at runtime — the pieces are ordinary
+       segments that the rest of the pipeline already validates.
+       ========================================================= */
+    let name;
+    const pieces = ['bridge','gate'].filter(function(k){
+      return diff >= SEGMENTS[k].unlockAt;
+    });
+
+    if(segCount > 0 && segCount % 4 === 2 && pieces.length){
+      name = pieces[Math.floor(rnd() * pieces.length)];
+      if(name === lastSeg && pieces.length > 1){
+        name = pieces[(pieces.indexOf(name) + 1) % pieces.length];
+      }
+    } else {
+      name = pickSegment(diff, rnd, lastSeg, worldIdx);
+    }
+
     const spec = SEGMENTS[name];
     const segW = spec.minW + rnd()*(spec.minW*0.6);
 
@@ -1834,7 +2135,6 @@ function buildLevel(index){
       lavas   : 1 + Math.round(diff * 2),        /* 1 .. 3  */
       nails   : 1 + Math.round(diff * 5),        /* 1 .. 6  */
       saws    : 1 + Math.round(diff * 4),        /* 1 .. 5  */
-      /* risers removed — the fragile stone replaced them */
       crushers: 1 + Math.round(diff * 3)         /* 1 .. 4  */
     };
   };
@@ -1876,7 +2176,9 @@ function buildLevel(index){
     const step = 90;
     for(let pass = 0; pass < 4; pass++){
       const offset = pass === 0 ? 0 : r()*step;
-      for(let tx = 400 + offset; tx < wd - 500; tx += step){
+      /* the scan starts clear of the spawn zone: nothing lethal is
+         allowed in the player's first 700 units (see inSpawnZone) */
+      for(let tx = 820 + offset; tx < wd - 500; tx += step){
 
         /* ---- 1 · spacing ---- */
         if(B._nearHazard(tx, 80, 140)) continue;
@@ -1914,27 +2216,34 @@ function buildLevel(index){
           if(B.saw(tx, sy, TUNE.SAW_R, 'x',
                    70 + baseDiff * 50, 1.2 + baseDiff * 0.9)) return true;
         }
-        else if(kind === 'riser'){
-          /* a riser must bridge a void — never decoration on floor */
-          if(B.groundUnder(tx + 40, 300)) continue;
-          if(B.riser(tx, 420, 78, 0.85 - baseDiff * 0.45, true)) return true;
-        }
+        /* ---- riser branch removed with the mechanic itself.
+                `Builder.prototype.riser` no longer exists, so the old
+                branch would have thrown a TypeError the moment the
+                top-up pass reached it. ---- */
         else if(kind === 'crusher'){
           /* =========================================================
-             THE CRUSHER QUOTA COULD NEVER BE FILLED
+             THE CRUSHER QUOTA COULD NEVER BE FILLED (part 2)
              ---------------------------------------------------------
-             This call passed `y = 0`, and `B.crusher()` rejects
-             anything above y = 70 — so EVERY top-up attempt for a
-             crusher failed. A level whose segments happened to skip
-             the crusher hall stayed at zero crushers for the whole
-             run, even though the quota asked for one.
+             The previous fix derived the stone's y from an existing
+             ceiling — which was correct, but it assumed a ceiling
+             was there. Only two segment templates ever lay one
+             (`crushers` and `gauntlet`), so on most levels the loop
+             found `anchor === null` at every candidate and gave up.
+             Result: 0 falling stones on all 25 levels.
 
-             The stone's y is now DERIVED from the underside of the
-             ceiling it hangs from: that is the only value that can
-             satisfy the anchors rule, and it is the same rule the
-             authored crushers obey.
+             A top-up is now allowed to BUILD ITS OWN SLAB. The slab
+             is placed first, its return value is checked, and the
+             stone's y is derived from its underside — the same rule
+             the authored crushers obey, so the stone always hangs
+             from something visible.
              ========================================================= */
-          const sxc = tx + 35;
+          const slabW = 150;
+          const stoneW = 70;
+          const slabX = tx - (slabW - stoneW) / 2;
+          const slabY = Math.round(200 + baseDiff * 10);
+
+          /* an existing ceiling under which the stone can hang */
+          const sxc = tx + stoneW/2;
           let anchor = null;
           for(let ci=0; ci<B.ceils.length; ci++){
             const cc = B.ceils[ci];
@@ -1942,14 +2251,29 @@ function buildLevel(index){
             const bottom = cc[1] + cc[3];
             if(anchor === null || bottom > anchor) anchor = bottom;
           }
-          if(anchor === null) continue;
-          if(B.crusher(tx, anchor, 70,
-                       110 + baseDiff * 90, 1.1 + baseDiff * 1.5)) return true;
+
+          if(anchor !== null){
+            if(B.crusher(tx, anchor, stoneW,
+                         110 + baseDiff * 90, 1.1 + baseDiff * 1.5)) return true;
+          } else {
+            /* no ceiling — lay one, then hang the stone from it */
+            if(!B.ceil(slabX, slabY, slabW)) continue;
+            if(B.crusher(tx, slabY + TUNE.CEIL_H + 4, stoneW,
+                         110 + baseDiff * 90, 1.1 + baseDiff * 1.5)) return true;
+            /* the stone was refused — take the slab back out so the
+               level does not end up with a ceiling and no reason */
+            B.ceils.pop();
+          }
         }
       }
     }
     return false;
-  };
+  };/*
+[/OLD]
+      }
+    }
+    return false;
+  };*/
 
   /* `single` is the singular name `topUp` understands */
   const FAMILIES = [
@@ -2081,50 +2405,159 @@ function buildLevel(index){
   const cand = B.cpCandidates.slice().sort(function(a,b){ return a-b; });
   let lastCpX = -1e9;
 
+  /* =========================================================
+     A CHECKPOINT IS A PROMISE OF SAFETY
+     ---------------------------------------------------------
+     The window was 90 units forward and 120 back. In a level this
+     dark the lantern reaches roughly 400, so a flame 150 units away
+     LOOKS like it is standing on the checkpoint — that is the
+     screenshot, and it is not a rendering bug, it is the geometry.
+
+     There was a second, worse hole: when every authored candidate
+     was filtered out, the level fell back to a hard-coded checkpoint
+     at x = 950 that was never tested against anything at all. It
+     could land in a fire with no test standing in its way.
+
+     Both paths now run through `cpBlocked`, the window is nearly
+     three times wider each way, and the fallback is chosen by
+     SEARCHING for a safe spot instead of assuming one.
+     ========================================================= */
+  const CP_FWD = 220, CP_BACK = 170;
+
+  const cpBlocked = function(px){
+    let bad = false;
+    const chk = function(hx, hw){
+      if(px + CP_FWD > hx && px - CP_BACK < hx + hw) bad = true;
+    };
+    for(let k=0;k<B.spikes.length;k++)   chk(B.spikes[k][0],   B.spikes[k][2]);
+    for(let k=0;k<B.fires.length;k++)    chk(B.fires[k][0],    B.fires[k][2]);
+    for(let k=0;k<B.lavas.length;k++)    chk(B.lavas[k][0],    B.lavas[k][2]);
+    for(let k=0;k<B.nails.length;k++)    chk(B.nails[k][0],    B.nails[k][2]);
+    for(let k=0;k<B.crushers.length;k++) chk(B.crushers[k][0], B.crushers[k][2]);
+    for(let k=0;k<B.saws.length;k++){
+      const sw = B.saws[k];
+      const wide = (sw.axis === 'x');
+      chk(wide ? sw.x - sw.r - sw.dist : sw.x - sw.r,
+          wide ? (sw.r + sw.dist) * 2 : sw.r * 2);
+    }
+    return bad;
+  };
+
+  const cpOnCrumb = function(px, topY){
+    for(let k=0;k<B.crumbs.length;k++){
+      const c = B.crumbs[k];
+      if(px >= c[0]-20 && px <= c[0]+c[2]+20 && Math.abs(c[1]-topY) < 20) return true;
+    }
+    return false;
+  };
+
   for(let i=0;i<cand.length;i++){
     const cx = cand[i];
     if(cx - lastCpX < TUNE.CP_SPACING) continue;
 
     const g = B.groundUnder(cx, 300);
     if(!g) continue;
+    if(cpOnCrumb(cx, g[1])) continue;
+    if(cpBlocked(cx)) continue;
 
-    let onCrumb = false;
-    for(let k=0;k<B.crumbs.length;k++){
-      const c = B.crumbs[k];
-      if(cx >= c[0]-20 && cx <= c[0]+c[2]+20 && Math.abs(c[1]-g[1]) < 20) onCrumb = true;
-    }
-    if(onCrumb) continue;
-
-    let blocked = false;
-    const checkHazard = function(hx, hw){
-      if(cx + TUNE.CP_SAFE_FWD > hx && cx - TUNE.CP_SAFE_BACK < hx + hw) blocked = true;
-    };
-    for(let k=0;k<B.spikes.length;k++) checkHazard(B.spikes[k][0], B.spikes[k][2]);
-    for(let k=0;k<B.fires.length;k++)  checkHazard(B.fires[k][0],  B.fires[k][2]);
-    for(let k=0;k<B.lavas.length;k++)  checkHazard(B.lavas[k][0],  B.lavas[k][2]);
-    if(blocked) continue;
-
-    cps.push([cx, g[1] - 30]);
+    /* -PLAYER_H, not -30: 30 was the height of the pole, so the
+       player spawned four units INSIDE the stone on the first frame */
+    cps.push([cx, g[1] - TUNE.PLAYER_H]);
     lastCpX = cx;
   }
 
-  /* an early checkpoint so a death in the first stretch is cheap */
+  /* an early checkpoint so a death in the first stretch is cheap —
+     and now it is validated exactly like an authored one */
   if(!cps.length || cps[0][0] > 1500){
-    const g0 = B.groundUnder(950, 300);
-    if(g0) cps.unshift([950, g0[1] - 30]);
+    for(let px = 900; px <= 1700; px += 40){
+      const g0 = B.groundUnder(px, 300);
+      if(!g0 || g0[1] > TUNE.GROUND_Y) continue;
+      if(cpOnCrumb(px, g0[1])) continue;
+      if(cpBlocked(px)) continue;
+      cps.unshift([px, g0[1] - TUNE.PLAYER_H]);
+      break;
+    }
   }
 
   /* =========================================================
      OIL — evenly spaced, always on solid ground.
+     ---------------------------------------------------------
+     THE BUG THIS FIXES — "I NEVER FOUND ANY OIL"
+     ---------------------------------------------
+     A flask was validated with
+
+         B._hitBox(ox+d-10, g[1]-30, 20, 28, 20)
+
+     `_hitBox` tests against EVERY platform, and the flask sits
+     30 units above the floor it is standing on. With a 20-unit
+     pad, the test box reaches from `g[1]-50` to `g[1]+18`, which
+     overlaps the floor slab itself (top at `g[1]`, bottom at
+     `g[1]+40`). So the very ground the flask was standing on
+     rejected it — every single time, on every level.
+
+     The result was a game with a draining oil meter, a tutorial
+     step that says "pick up the orange flasks", and ZERO flasks
+     in all 25 levels.
+
+     The flask now only has to be clear of geometry that is
+     genuinely in the way: platforms whose top is ABOVE the flask's
+     base. The floor it stands on is not an obstruction.
      ========================================================= */
   const oil = [];
+  const oilClear = function(fx, fy){
+    /* fy = the flask centre. The flask is 20x28, so its base is
+       fy + 14 and its top is fy - 14. */
+    const top = fy - 14, bot = fy + 14, left = fx - 10, right = fx + 10;
+    for(let i=0;i<B.plats.length;i++){
+      const p = B.plats[i];
+      if(p[0] >= right || p[0] + p[2] <= left) continue;
+      /* a platform whose top is at or below the flask's base is the
+         ground it stands on — not an obstruction */
+      if(p[1] >= bot - 6) continue;
+      if(p[1] + p[3] > top) return false;
+    }
+    for(let i=0;i<B.ceils.length;i++){
+      const c = B.ceils[i];
+      if(c[0] >= right || c[0] + c[2] <= left) continue;
+      if(c[1] + c[3] > top && c[1] < bot) return false;
+    }
+    for(let i=0;i<B.crumbs.length;i++){
+      const c = B.crumbs[i];
+      if(c[0] >= right || c[0] + c[2] <= left) continue;
+      if(c[1] + c[3] > top && c[1] < bot) return false;
+    }
+    return true;
+  };
+
+  /* one flask roughly every OIL_STEP units, always on real ground,
+     never inside a wall, and never in the spawn zone */
   for(let ox = 700; ox < wd - 420; ox += TUNE.OIL_STEP){
-    for(let d=0; d<240; d+=40){
-      const g = B.groundUnder(ox + d, 300);
+    let placed = false;
+    for(let d = 0; d < 320 && !placed; d += 40){
+      const fx = ox + d;
+      const g = B.groundUnder(fx, 300);
       if(!g) continue;
-      if(B._hitBox(ox+d-10, g[1]-30, 20, 28, 20)) continue;
-      oil.push([Math.round(ox+d), Math.round(g[1]-40)]);
-      break;
+      if(g[1] > TUNE.GROUND_Y) continue;
+      const fy = g[1] - 40;
+      if(!oilClear(fx, fy)) continue;
+      oil.push([Math.round(fx), Math.round(fy)]);
+      placed = true;
+    }
+    /* a second sweep, walking BACKWARDS from the slot, for the
+       stretches where the forward scan runs into a chasm */
+    if(!placed){
+      for(let d = 40; d <= 320; d += 40){
+        const fx = ox - d;
+        if(fx < 500) break;
+        const g = B.groundUnder(fx, 300);
+        if(!g) continue;
+        if(g[1] > TUNE.GROUND_Y) continue;
+        const fy = g[1] - 40;
+        if(!oilClear(fx, fy)) continue;
+        oil.push([Math.round(fx), Math.round(fy)]);
+        placed = true;
+        break;
+      }
     }
   }
 
@@ -2165,7 +2598,6 @@ function buildLevel(index){
     /* ---- new hazard families ---- */
     saws       : B.saws,
     nails      : B.nails,
-    risers     : B.risers,
     crushers   : B.crushers,
     checkpoints: cps,
     goal       : goal,
@@ -2202,9 +2634,8 @@ function buildLevel(index){
                       B.lavas.length    * 2.8 +
                       B.movers.length   * 3.0 +
                       B.nails.length    * 1.4 +
-                      B.saws.length     * 2.6 +
-                      B.risers.length   * 2.2 +
-                      B.crushers.length * 3.0)
+                                             B.saws.length     * 2.6 +
+                       B.crushers.length * 3.0)
                  ),
     diff       : baseDiff
   };
