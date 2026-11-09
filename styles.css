@@ -56,16 +56,17 @@ html[lang="en"] body{font-family:'Outfit',system-ui,-apple-system,'Segoe UI',san
 .ic.gold{color:var(--gold)}
 
 /* ============ MENU ============ */
-#scr-menu{padding:0;place-items:stretch}
+#scr-menu{padding:0;place-items:stretch;isolation:isolate}
 .menu-wrap{
-  position:relative;width:100%;height:100%;
+  position:relative;z-index:2;
+  width:100%;height:100%;
   display:grid;
   grid-template-columns:minmax(min(240px,100%),1fr) minmax(min(240px,100%),1fr);
   align-items:center;
   place-content:center;
-  gap:clamp(18px,3.4vw,64px);
-  padding-block:clamp(16px,3.4vh,44px);
-  padding-inline:clamp(20px,4.5vw,80px);
+  gap:clamp(22px,4.6vw,92px);
+  padding-block:clamp(22px,4.2vh,56px);
+  padding-inline:clamp(20px,5vw,88px);
 }
 .menu-hero{order:1}
 .menu-actions{order:2}
@@ -159,8 +160,17 @@ html[lang="en"] .sub{letter-spacing:.34em;font-size:clamp(10px,1.5vh,13px);text-
 }
 
 .menu-actions{
+  position:relative;
   display:flex;flex-direction:column;gap:clamp(8px,1.5vh,14px);
   width:100%;max-width:min(430px,100%);justify-self:center;min-width:0;
+  padding:clamp(16px,2.6vh,26px);
+  border-radius:24px;
+  border:1px solid rgba(255,201,120,.15);
+  background:linear-gradient(168deg,rgba(26,18,36,.60),rgba(9,6,16,.74));
+  box-shadow:
+    0 30px 74px rgba(0,0,0,.58),
+    0 0 0 1px rgba(255,255,255,.03) inset,
+    0 1px 0 rgba(255,255,255,.07) inset;
 }
 .menu-row{display:grid;grid-template-columns:1fr 1fr;gap:clamp(8px,1.5vh,14px)}
 
@@ -251,6 +261,128 @@ html[dir="rtl"] .btn.primary::after{
 .chip:hover{background:rgba(255,201,120,.16);border-color:rgba(255,201,120,.5);transform:translateY(-1px)}
 .chip.off{opacity:.45}
 .chip.off .ic{color:var(--muted)}
+
+/* =========================================================
+   MAIN MENU — ARTWORK BACKDROP
+   ---------------------------------------------------------
+   The menu stands on its own painting now, in three layers:
+
+     1  the image itself, cover, centred, nudged 3% so a
+        rounding error can never leave an edge seam
+     2  a graded dim that is LIGHTEST where the content sits
+        and closes down towards the four edges — that is what
+        makes the centre column read as lit
+     3  a warm lift at the floor, so the action panel is not
+        floating on nothing
+
+   Deliberately no `backdrop-filter` anywhere in here: the
+   ambient canvas keeps repainting behind this screen, so a
+   blur over it would cost exactly the frame time we just
+   removed from the rest of the game.
+   ========================================================= */
+#scr-menu::before,
+#scr-menu::after{
+  content:'';position:absolute;inset:0;pointer-events:none;
+}
+#scr-menu::before{
+  z-index:0;
+  /* The artwork is the top layer. The two gradients beneath it are the
+     fallback: if bg.png is missing, still loading, or fails to decode,
+     the menu stands on a deep violet field instead of flat black. */
+  background-color:#08060f;
+  background-image:
+    url('assest/bg.png'),
+    radial-gradient(120% 90% at 50% 26%, #1d1230 0%, #0b0714 58%, #050309 100%),
+    linear-gradient(180deg, #120b1e 0%, #07050e 100%);
+  background-size:cover, cover, cover;
+  background-position:center, center, center;
+  background-repeat:no-repeat, no-repeat, no-repeat;
+  transform:scale(1.03);
+}
+#scr-menu::after{
+  z-index:1;
+  background:
+    radial-gradient(115% 85% at 50% 44%,
+      rgba(6,4,12,.10) 0%,
+      rgba(6,4,12,.40) 52%,
+      rgba(4,3,9,.86) 100%),
+    linear-gradient(180deg,
+      rgba(4,3,9,.72) 0%,
+      rgba(6,4,12,.20) 30%,
+      rgba(6,4,12,.26) 68%,
+      rgba(4,3,9,.82) 100%);
+}
+
+/* ---- the hairline between the two columns: the cheapest way to
+        make a two-column hero read as composed rather than stacked ---- */
+.menu-wrap::before{
+  content:'';position:absolute;
+  inset-block:16%;
+  inset-inline-start:50%;
+  width:1px;
+  background:linear-gradient(180deg,
+    rgba(255,201,120,0) 0%,
+    rgba(255,201,120,.20) 20%,
+    rgba(255,201,120,.34) 50%,
+    rgba(255,201,120,.20) 80%,
+    rgba(255,201,120,0) 100%);
+  pointer-events:none;
+}
+
+/* ---- the hero ornament: a gold rule broken by a diamond ---- */
+.title-rule{
+  display:flex;align-items:center;justify-content:center;
+  gap:10px;
+  width:min(280px,68%);
+  margin:clamp(12px,2vh,20px) auto clamp(8px,1.4vh,14px);
+}
+.title-rule::before,
+.title-rule::after{
+  content:'';flex:1 1 auto;height:1px;
+  background:linear-gradient(90deg,
+    rgba(255,201,120,0) 0%,
+    rgba(255,201,120,.55) 100%);
+}
+.title-rule::after{transform:scaleX(-1)}
+.title-rule i{
+  width:6px;height:6px;flex:0 0 auto;
+  border:1px solid rgba(255,201,120,.80);
+  transform:rotate(45deg);
+  box-shadow:0 0 10px rgba(255,201,120,.45);
+}
+
+/* ---- a lit top edge on the action panel, mirroring the
+        progress card's own hairline so the two read as a set ---- */
+.menu-actions::before{
+  content:'';position:absolute;
+  inset-inline:22%;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,201,120,.55),transparent);
+  pointer-events:none;
+}
+
+/* ---- and the same idea closing the progress card at the bottom ---- */
+.hero-stats::after{
+  content:'';position:absolute;bottom:0;left:50%;transform:translateX(-50%);
+  width:52%;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(255,201,120,.20),transparent);
+}
+
+@media (max-width:760px){
+  .menu-wrap::before{display:none}
+  .menu-actions::before{inset-inline:16%}
+  #scr-menu::after{
+    background:
+      radial-gradient(125% 90% at 50% 38%,
+        rgba(6,4,12,.14) 0%,
+        rgba(6,4,12,.52) 58%,
+        rgba(4,3,9,.90) 100%),
+      linear-gradient(180deg,
+        rgba(4,3,9,.78) 0%,
+        rgba(6,4,12,.30) 34%,
+        rgba(6,4,12,.34) 70%,
+        rgba(4,3,9,.86) 100%);
+  }
+}
 
 /* ============ SCREENS ============ */
 .screen{
@@ -971,7 +1103,7 @@ body.rotated #stage{
     padding-inline:clamp(16px,4vw,32px);
   }
   .menu-hero{order:1;gap:0}
-  .menu-actions{order:2;max-width:100%}
+  .menu-actions{order:2;max-width:100%;padding:clamp(13px,2.2vh,19px);border-radius:19px}
   .lamp{width:clamp(44px,8vh,72px);height:clamp(44px,8vh,72px)}
   .title{font-size:clamp(32px,7.4vh,60px)}
   .sub{margin-top:2px}
