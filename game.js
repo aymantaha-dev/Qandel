@@ -64,7 +64,100 @@ try{
 }catch(e){}
 function persist(){ try{ localStorage.setItem(SKEY,JSON.stringify(save)); }catch(e){} }
 function starsOf(i){ const r=save.levels[i]; return r? (r.stars||0) : 0; }
-function unlocked(i){ return i===0 || starsOf(i-1)>0; }
+
+/* =========================================================
+   UNLOCKED LEVELS — a permanent record, separate from stars.
+   ---------------------------------------------------------
+   THE BUG THIS FIXES
+   ------------------
+   `unlocked(i)` used to be derived on the fly:
+
+       return i === 0 || starsOf(i-1) > 0;
+
+   That is a CHAIN, not a record. It means a level is only open
+   while the level immediately before it still has a star. Two
+   consequences, both bad:
+
+     · If `save.levels` is ever partially lost — a cleared cache,
+       a failed write, a browser that evicts storage under
+       pressure — every level past the gap LOCKS AGAIN, even
+       though the player has already beaten it. The levels screen
+       becomes a wall of padlocks over content they own.
+
+     · A player who reached level 18 by playing 1..17 can never
+       jump back to level 18 from a fresh session unless they
+       re-earn 17. The progress exists; the permission does not.
+
+   The fix is to record the unlock explicitly. `save.unlocked` is
+   a map of level index → true, written the moment a level is
+   entered, and it is never removed by anything except the reset
+   button. `unlocked()` reads that map first and only falls back
+   to the old chain rule for saves created before this existed.
+
+   `maxUnlocked` is the highest index ever entered, so the levels
+   screen can tell "opened" from "never reached" without walking
+   the whole map.
+   ========================================================= */
+function markUnlocked(i){
+  if(i < 0 || i >= LEVELS.length) return;
+  save.unlocked = save.unlocked || {};
+  save.unlocked[i] = 1;
+  /* the next level opens the moment this one is entered — you do
+     not have to finish it to keep the door you already walked
+     through */
+  if(i + 1 < LEVELS.length) save.unlocked[i+1] = 1;
+  if(save.maxUnlocked === undefined || i > save.maxUnlocked){
+    save.maxUnlocked = i;
+  }
+  persist();
+}
+
+function unlocked(i){
+  if(i < 0 || i >= LEVELS.length) return false;
+  if(i === 0) return true;
+
+  /* ---- 1 · the explicit record wins, always ---- */
+  if(save.unlocked && save.unlocked[i]) return true;
+
+  /* ---- 2 · legacy saves: fall back to the old chain rule, and
+              back-fill the record so it never regresses again ---- */
+  if(starsOf(i-1) > 0){
+    save.unlocked = save.unlocked || {};
+    save.unlocked[i] = 1;
+    if(save.maxUnlocked === undefined || i > save.maxUnlocked) save.maxUnlocked = i;
+    return true;
+  }
+  return false;
+}
+
+/* =========================================================
+   MIGRATION — rebuild the unlock record from existing stars.
+   ---------------------------------------------------------
+   A player upgrading from an older build has `save.levels` full
+   of stars but no `save.unlocked` map. Without this they would
+   open the levels screen and see their progress padlocked.
+
+   Every level with a star implies the next one was reachable, so
+   the map is filled from the star table, then extended by one
+   past the highest completed level. Runs once at boot.
+   ========================================================= */
+function migrateUnlocks(){
+  save.unlocked = save.unlocked || {};
+  let highest = -1;
+  for(let i=0;i<LEVELS.length;i++){
+    if(starsOf(i) > 0){
+      save.unlocked[i] = 1;
+      if(i + 1 < LEVELS.length) save.unlocked[i+1] = 1;
+      if(i > highest) highest = i;
+    }
+  }
+  if(highest > -1 && (save.maxUnlocked === undefined || highest > save.maxUnlocked)){
+    save.maxUnlocked = highest;
+  }
+  if(save.maxUnlocked === undefined) save.maxUnlocked = 0;
+  save.unlocked[0] = 1;
+  persist();
+}
 
 /* ---------------- audio (sfx) ---------------- */
 const AU={
@@ -447,6 +540,27 @@ function loadLevel(i){
   const lrnd = (typeof seedRand === 'function')
     ? seedRand((((i+1) * 2654435761) ^ 0x51ed2701) >>> 0)
     : Math.random;
+  /* =========================================================
+     A LEVEL THAT DOES NOT EXIST MUST NOT CRASH THE GAME
+     ---------------------------------------------------------
+     `LEVELS[i]` can be undefined if anything upstream passes a bad
+     index — a stale save, a tile bound to the wrong number, a level
+     list shorter than the UI believes. Reading `.w` off it threw
+
+         TypeError: Cannot read properties of undefined (reading 'w')
+
+     and left the player on a dead screen with no way back.
+
+     Falling back to level 0 is not a silent lie: it is the one
+     level that is always valid, and it puts the player somewhere
+     playable instead of nowhere. The console records what happened
+     so the real cause can still be found.
+     ========================================================= */
+  if(!LEVELS[i]){
+    console.error('[qandil] loadLevel(' + i + ') — no such level. Falling back to 0.');
+    i = 0;
+    S.level = 0;
+  }
   const L=LEVELS[i], W=WORLDS.filter(w=>w.id===L.w)[0]||WORLDS[0];
   cur={ L:L, W:W, plats:[], movers:[], ceils:[], crumbs:[], gems:[], oils:[],
         spikes:[], fires:[], lavas:[], checkpoints:[], goal:null,
@@ -1207,6 +1321,16 @@ function win(){
     save.levels[S.level]={stars:Math.max(stars, prev?prev.stars:0), time:Math.min(ratio, prev&&prev.time?prev.time:999)};
     persist();
   }
+  /* =========================================================
+     WINNING OPENS THE NEXT LEVEL — explicitly.
+     ---------------------------------------------------------
+     `highestOpen()` already derives this from the star that was
+     just written, but recording it directly means the unlock does
+     not depend on the star count surviving a later replay. One
+     level won, one level opened, permanently.
+     ========================================================= */
+  if(S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
+
   S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio};
   setTimeout(()=>{ showResult(); }, 620);
 }
@@ -4094,8 +4218,17 @@ function showHud(){
 
 function startLevel(i){
   loadLevel(i);
+  /* =========================================================
+     ENTERING A LEVEL IS PROGRESS
+     ---------------------------------------------------------
+     The moment the player is standing in level `i`, that level is
+     open — permanently. Recording it here (not only on a win) is
+     what stops a level from re-locking itself if the player later
+     fails it or replays an earlier one.
+     ========================================================= */
+  markUnlocked(i);
   /* a hazard card from the previous level must not follow the
-     player into this one */
+      player into this one */
   hideHazardCard();
   TUT.hazardQueue = [];
   TUT.hazardDelay = 0;
@@ -4111,10 +4244,29 @@ function startLevel(i){
   if(i === 0) TUT.start(); else TUT.hide(false);
 }
 
+/* =========================================================
+   "CONTINUE" — which level does the play button open?
+   ---------------------------------------------------------
+   The old version scanned for the first unlocked level with zero
+   stars. That is the right answer for a player mid-run, but it
+   is the wrong answer for a player who has beaten everything and
+   is replaying: every level has stars, so the loop falls through
+   to the LAST level and dumps them at level 25.
+
+   Now the rule is explicit:
+     · if any unlocked level is unfinished, go to the first one
+     · otherwise go to the highest level ever reached
+   ========================================================= */
 function nextUnlocked(){
-  for(let i=0;i<LEVELS.length;i++) if(unlocked(i) && starsOf(i)===0) return i;
-  for(let i=LEVELS.length-1;i>=0;i--) if(unlocked(i)) return i;
-  return 0;
+  let firstUnfinished = -1;
+  let highest = 0;
+  for(let i=0;i<LEVELS.length;i++){
+    if(!unlocked(i)) continue;
+    highest = i;
+    if(firstUnfinished === -1 && starsOf(i) === 0) firstUnfinished = i;
+  }
+  if(firstUnfinished !== -1) return firstUnfinished;
+  return highest;
 }
 
 function showResult(){
@@ -4158,33 +4310,106 @@ function showResult(){
 function renderLevels(){
   const grid=qs('#level-grid');
   grid.innerHTML='';
-  let idx=0;
-  WORLDS.forEach(function(w){
-    /* only render a world header if that world actually has levels */
-    let count=0;
-    for(let i=0;i<LEVELS.length;i++) if(LEVELS[i].w===w.id) count++;
-    if(count===0) return;
 
-    const head=document.createElement('div');
-    head.className='world-head';
-    head.textContent = (w.name[LANG]||w.name.ar).toUpperCase();
-    grid.appendChild(head);
+  /* =========================================================
+     THE TILE INDEX MUST BE THE LEVEL INDEX — NOT A COUNTER
+     ---------------------------------------------------------
+     THE BUG THIS FIXES
+     ------------------
+     The old loop walked the five worlds and, for each one, counted
+     how many levels it owned, then emitted that many tiles while
+     incrementing a shared `idx`. That only works if every level
+     belongs to exactly one world AND the worlds are visited in the
+     same order the levels were authored.
 
-    for(let k=0;k<count;k++,idx++){
+     When a level's `w` field does not match any world — a typo, a
+     renamed world, a level added without a world — the count for
+     that world is wrong, `idx` drifts, and the LAST tiles end up
+     pointing at `LEVELS[25]`, `LEVELS[26]` … which do not exist.
+     Tapping one of them called `startLevel(29)`, `loadLevel(29)`
+     read `LEVELS[29].w` on `undefined`, and the game threw
+
+         TypeError: Cannot read properties of undefined (reading 'w')
+
+     — from the player's side, "I tap a level and nothing happens".
+
+     The fix is to stop counting. Each tile is emitted from its own
+     level index, taken directly from `LEVELS`, so a tile can never
+     point at a level that does not exist. Worlds are still used for
+     their headers, but the header is emitted only when the next
+     level actually belongs to that world.
+     ========================================================= */
+  let lastWorld = null;
+
+  for(let idx=0; idx<LEVELS.length; idx++){
+    const L = LEVELS[idx];
+    if(!L) continue;
+
+    /* a world header whenever the world changes */
+    const wid = L.w;
+    if(wid !== lastWorld){
+      const wDef = WORLDS.filter(function(w){ return w.id === wid; })[0];
+      const head = document.createElement('div');
+      head.className = 'world-head';
+      head.textContent = wDef
+        ? (wDef.name[LANG] || wDef.name.ar).toUpperCase()
+        : String(wid || '').toUpperCase();
+      grid.appendChild(head);
+      lastWorld = wid;
+    }
+
+    {
       const stars=starsOf(idx);
       const open=unlocked(idx);
       const b=document.createElement('button');
-      b.className='lv'+(open?'':' locked');
+      /* =========================================================
+         THREE STATES, NOT TWO
+         ---------------------------------------------------------
+         `locked` and `open` were the only classes the grid knew,
+         so a level the player had reached but not yet cleared was
+         indistinguishable from an untouched one. That is the level
+         they are most likely to want — it gets `next`.
+
+         The button is a real <button> in every state, so the
+         keyboard can reach it and a screen reader announces it.
+         Only the locked ones have their click handler withheld.
+         ========================================================= */
+      const isNext = open && stars === 0;
+      b.className = 'lv' + (open ? (isNext ? ' next' : ' done') : ' locked');
+      b.type = 'button';
+      b.setAttribute('aria-label', (idx+1) + (open ? '' : ' — ' + t('levels.locked')));
+
       let sHtml='';
       for(let s=0;s<3;s++) sHtml+='<svg class="ic'+(s<stars?' on':'')+'"><use href="#i-star"/></svg>';
       b.innerHTML='<b>'+(idx+1)+'</b><span class="st">'+sHtml+'</span>'+
         (open?'':'<svg class="ic lk"><use href="#i-lock"/></svg>');
+
+      /* =========================================================
+         THE CLICK HANDLER — bound to EVERY open tile.
+         ---------------------------------------------------------
+         This is the whole point of the levels screen: a level you
+         have opened is a level you may play again, from here, at
+         any time. The handler is attached to `open` tiles only —
+         a locked tile gets no handler and is `disabled`.
+
+         `AU.init()` is called first because the click is a real
+         user gesture, which is the only moment a browser will let
+         an AudioContext start. Without it the first level entered
+         from this screen would play in silence.
+         ========================================================= */
       if(open){
-        b.addEventListener('click', function(){ AU.click(); startLevel(idx); });
+        b.addEventListener('click', function(ev){
+          if(ev) ev.preventDefault();
+          AU.click();
+          AU.init();
+          startLevel(idx);
+        });
+      } else {
+        b.disabled = true;
       }
       grid.appendChild(b);
     }
-  });
+  }
 
   let total=0, done=0;
   for(let i=0;i<LEVELS.length;i++){ total+=starsOf(i); if(starsOf(i)>0) done++; }
@@ -4197,6 +4422,40 @@ function renderLevels(){
   const playBtn=qs('#btn-play');
   const label=playBtn.querySelector('span');
   if(label) label.textContent = done>0 ? t('menu.continue') : t('menu.play');
+
+  /* =========================================================
+     SELF-CHECK — the levels screen must never silently dead-end
+     ---------------------------------------------------------
+     A grid where every tile is locked looks identical to a grid
+     where the click handlers failed to bind. Both leave the player
+     tapping a level and nothing happening, with no clue why.
+
+     This reports the real numbers to the console so the two cases
+     can be told apart in one glance:
+
+       LEVELS 0           → levels.js failed to build; nothing can work
+       open 0             → the unlock record is empty
+       open N, no handler → a binding bug in this function
+
+     It costs one pass over 25 entries, once per render, and it is
+     the difference between "it is broken" and "here is what broke".
+     ========================================================= */
+  (function selfCheck(){
+    try{
+      let openCount = 0;
+      for(let i=0;i<LEVELS.length;i++) if(unlocked(i)) openCount++;
+      const tiles = qs('#level-grid') ? qs('#level-grid').children.length : 0;
+      if(LEVELS.length === 0){
+        console.error('[qandil] LEVELS is empty — levels.js did not build.');
+      } else if(openCount === 0){
+        console.error('[qandil] no level is unlocked. save.unlocked =',
+                      JSON.stringify(save.unlocked), 'maxUnlocked =', save.maxUnlocked);
+      } else {
+        console.log('[qandil] levels:', LEVELS.length, '· open:', openCount,
+                    '· tiles:', tiles, '· unlocked map:', JSON.stringify(save.unlocked));
+      }
+    }catch(e){ console.warn('[qandil] self-check failed:', e); }
+  })();
 }
 
 /* ---------------- settings sync ---------------- */
@@ -4430,7 +4689,11 @@ qs('#btn-reset').addEventListener('click', function(){
   const btn=qs('#btn-reset');
   const span=btn.querySelector('span');
   const old=span ? span.textContent : t('settings.resetBtn');
-  save.levels={}; persist(); renderLevels();
+  /* the reset must clear the unlock record too, otherwise the
+     levels screen would keep showing every level as open after a
+     "reset progress" — which is the opposite of what it promises */
+  save.levels={}; save.unlocked={0:1}; save.maxUnlocked=0;
+  persist(); renderLevels();
   btn.innerHTML='<svg class="ic"><use href="#i-check"/></svg><span></span>';
   btn.querySelector('span').textContent = (LANG==='ar')?'تم':'Done';
   setTimeout(function(){
@@ -4498,6 +4761,18 @@ function frame(now){
 
 /* ---------------- boot ---------------- */
 resize();
+
+/* =========================================================
+   REBUILD THE UNLOCK RECORD BEFORE ANYTHING READS IT
+   ---------------------------------------------------------
+   `migrateUnlocks` turns the star table into an explicit unlock
+   map, so a save created by an older build — or one that lost its
+   `unlocked` field — still opens every level the player has
+   actually reached. It must run before `renderLevels`, which is
+   the first thing that asks "is this level open?".
+   ========================================================= */
+try{ migrateUnlocks(); }catch(e){ console.warn('[qandil] unlock migration failed:', e); }
+
 applyI18n();
 renderLevels();
 syncSettings();

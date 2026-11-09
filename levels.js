@@ -313,7 +313,28 @@ Builder.prototype.ensureSpawnPad = function(){
   const PLAYER_W = TUNE.PLAYER_W;
   const padTo    = SPAWN_X + PLAYER_W + 314;   /* 420 */
 
-  /* ---- 1 · is the footprint already covered by a real floor? ---- */
+  /* =========================================================
+     NOTE — THE SPAWN COLUMN IS NOT CLEARED
+     ---------------------------------------------------------
+     An earlier revision of this function deleted every floating
+     stone whose footprint touched the spawn column. That was a
+     mistake: it silently removed geometry the level had authored
+     on purpose, and it fought with `spawnY` below — the stone was
+     gone, so `spawnY` found nothing to stand on and fell back to
+     the ground line, which is exactly the bug it was meant to fix.
+
+     The correct division of labour is:
+
+       · `ensureSpawnPad` guarantees there is FLOOR under the spawn
+       · `spawnY`        puts the player ON TOP of whatever is there
+
+     Neither of them deletes anything. A stone over the spawn is
+     legitimate level design; the player simply starts on it.
+     ========================================================= */
+
+  /* =========================================================
+     STEP 1 — is the footprint covered by a real floor?
+     ========================================================= */
   let covered = false;
   for(let i=0;i<this.plats.length;i++){
     const p = this.plats[i];
@@ -323,22 +344,90 @@ Builder.prototype.ensureSpawnPad = function(){
       break;
     }
   }
-  if(covered) return false;
 
-  /* ---- 2 · lay the pad. `floor()` refuses anything under 40 wide,
-              so a 420-wide pad is always legal. ---- */
-  this.floor(0, padTo);
+  /* =========================================================
+     STEP 3 — lay the pad when the floor is missing.
+     `floor()` refuses anything under 40 wide, so a 420-wide pad
+     is always legal.
+     ========================================================= */
+  if(!covered) this.floor(0, padTo);
 
-  /* ---- 3 · clear anything floating inside the pad footprint.
-              A stone hovering over the spawn is not ground, and the
-              player would land on it and slide straight off. ---- */
-  for(let i=this.plats.length-1;i>=0;i--){
+  return !covered;
+};
+
+/* =========================================================
+   SPAWN HEIGHT — the player must start ON TOP of whatever is at
+   the spawn column, not at a fixed y.
+   ---------------------------------------------------------
+   THE BUG THIS FIXES
+   ------------------
+   `spawn` was authored as `[80, GROUND_Y - PLAYER_H]` — a fixed
+   y of 466, i.e. the player's feet exactly on the ground line.
+
+   That is only correct when the spawn column is empty. When a
+   level's first segment left a FLOATING STONE over x = 80 (and
+   several do — `segStairs`, `segIsland` and `segRun` all place
+   platforms in the first few hundred units), the player was
+   spawned INSIDE that stone:
+
+        stone top    y = 440
+        player top   y = 466   ← 26 units BELOW the stone's top
+        player feet  y = 500
+
+   On the first physics frame the Y-resolution pushes the player
+   up to `stone.y - PLAYER_H` = 406, so the spirit pops out of the
+   top of the rock, slides off its edge, and drops into the void
+   between the stone and the floor. From the player's side that is
+   "the level starts and I am already falling".
+
+   The fix is not to delete the stone — it is to spawn the player
+   where they can actually stand: on the HIGHEST solid top that
+   covers the spawn column, at or above the ground line.
+
+   Returns the corrected y.
+   ========================================================= */
+Builder.prototype.spawnY = function(x, w){
+  const SPAWN_X = (x === undefined) ? 80 : x;
+  const PW = w || TUNE.PLAYER_W;
+
+  /* =========================================================
+     WHICH SURFACES COUNT?
+     ---------------------------------------------------------
+     The old test demanded that a platform cover the FULL
+     footprint (80 .. 106). That is too strict: a stone starting
+     at x = 90 and 100 wide covers the player's feet perfectly
+     well, but 90 > 80 made the test reject it — so the player
+     was spawned at the ground line, inside the stone, and the
+     physics popped them out of its top.
+
+     The honest question is: "would the player's feet land on this
+     surface?" The feet are a box, and a landing needs the stone
+     to overlap the MIDDLE of that box, not to swallow it whole.
+     Requiring an overlap of at least half the player width is the
+     same tolerance the physics engine's own `hit()` test gives,
+     without being so loose that a stone clipping one corner of
+     the spawn counts as a floor.
+
+     `p[1] <= GROUND_Y` keeps the search to surfaces at or above
+     the floor — nothing below the ground line is walkable.
+     ========================================================= */
+  const feetL = SPAWN_X;
+  const feetR = SPAWN_X + PW;
+  const needOverlap = PW * 0.5;
+
+  let best = null;
+  for(let i=0;i<this.plats.length;i++){
     const p = this.plats[i];
-    if(Math.abs(p[1] - TUNE.GROUND_Y) <= 2) continue;  /* keep floors */
-    if(p[0] < padTo && p[0] + p[2] > 0) this.plats.splice(i,1);
+    if(p[1] < 70) continue;                 /* off-screen — not a surface */
+    if(p[1] > TUNE.GROUND_Y) continue;      /* below the ground line */
+    const overlap = Math.min(p[0] + p[2], feetR) - Math.max(p[0], feetL);
+    if(overlap < needOverlap) continue;     /* does not hold the feet */
+    if(!best || p[1] < best) best = p[1];
   }
 
-  return true;
+  /* nothing solid → fall back to the ground line */
+  const surfaceY = (best === null) ? TUNE.GROUND_Y : best;
+  return surfaceY - TUNE.PLAYER_H;
 };
 
 /* =========================================================
@@ -2080,7 +2169,10 @@ function buildLevel(index){
     crushers   : B.crushers,
     checkpoints: cps,
     goal       : goal,
-    spawn      : [80, TUNE.GROUND_Y - TUNE.PLAYER_H],
+    /* the spawn y is DERIVED from the geometry, not hard-coded — the
+       player starts on top of whatever covers x = 80, so a floating
+       stone over the spawn no longer swallows them (see spawnY) */
+    spawn      : [80, B.spawnY(80)],
     /* =========================================================
        PAR — the 3-star time limit.
        ---------------------------------------------------------
