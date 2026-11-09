@@ -2,7 +2,7 @@
 'use strict';
 
 /* =========================================================
-   QANDIL — lantern spirit platformer
+   QANDEL — lantern spirit platformer
    Clean rewrite. No duplicated blocks, single source of truth
    for the game clock (S.t advances once per frame).
    ========================================================= */
@@ -42,7 +42,7 @@ function perfTick(dt){
   PERF.acc = 0; PERF.n = 0;
   if(avg > 0.023){
     PERF.off = true;
-    console.log('[qandil] post-processing disabled — avg frame ' +
+    console.log('[qandel] post-processing disabled — avg frame ' +
                 Math.round(avg * 1000) + 'ms');
   }
 }
@@ -85,10 +85,13 @@ function fmt(s){
 }
 
 /* ---------------- save ---------------- */
-const SKEY='qandil.save.v1';
+const SKEY='qandel.save.v1';
+/* the old key used to be spelled 'qandil.save.v1' — read it once so a
+   player who already has progress does not lose it on the rename */
+const SKEY_LEGACY='qandil.save.v1';
 let save={levels:{}, settings:{sound:true, music:true, quality:'high'}};
 try{
-  const raw=localStorage.getItem(SKEY);
+  const raw=localStorage.getItem(SKEY) || localStorage.getItem(SKEY_LEGACY);
   if(raw){ const o=JSON.parse(raw); save.levels=o.levels||{}; Object.assign(save.settings,o.settings||{}); }
 }catch(e){}
 function persist(){ try{ localStorage.setItem(SKEY,JSON.stringify(save)); }catch(e){} }
@@ -614,7 +617,7 @@ function loadLevel(i){
      so the real cause can still be found.
      ========================================================= */
   if(!LEVELS[i]){
-    console.error('[qandil] loadLevel(' + i + ') — no such level. Falling back to 0.');
+    console.error('[qandel] loadLevel(' + i + ') — no such level. Falling back to 0.');
     i = 0;
     S.level = 0;
   }
@@ -4860,15 +4863,15 @@ function renderLevels(){
       for(let i=0;i<LEVELS.length;i++) if(unlocked(i)) openCount++;
       const tiles = qs('#level-grid') ? qs('#level-grid').children.length : 0;
       if(LEVELS.length === 0){
-        console.error('[qandil] LEVELS is empty — levels.js did not build.');
-      } else if(openCount === 0){
-        console.error('[qandil] no level is unlocked. save.unlocked =',
-                      JSON.stringify(save.unlocked), 'maxUnlocked =', save.maxUnlocked);
-      } else {
-        console.log('[qandil] levels:', LEVELS.length, '· open:', openCount,
-                    '· tiles:', tiles, '· unlocked map:', JSON.stringify(save.unlocked));
-      }
-    }catch(e){ console.warn('[qandil] self-check failed:', e); }
+                 console.error('[qandel] LEVELS is empty — levels.js did not build.');
+       } else if(openCount === 0){
+         console.error('[qandel] no level is unlocked. save.unlocked =',
+                       JSON.stringify(save.unlocked), 'maxUnlocked =', save.maxUnlocked);
+       } else {
+         console.log('[qandel] levels:', LEVELS.length, '· open:', openCount,
+                     '· tiles:', tiles, '· unlocked map:', JSON.stringify(save.unlocked));
+       }
+     }catch(e){ console.warn('[qandel] self-check failed:', e); }
   })();
 }
 
@@ -5008,7 +5011,7 @@ function togglePause(){
 
   if(!secure){
     console.warn(
-      '[qandil] Not a secure context (' + location.protocol + ').\n' +
+      '[qandel] Not a secure context (' + location.protocol + ').\n' +
       'A service worker cannot register, so the game will NOT be installable.\n' +
       'Serve it over https, or run a local server (python3 -m http.server) and ' +
       'open http://localhost:8000.'
@@ -5017,14 +5020,14 @@ function togglePause(){
   }
 
   if(!('serviceWorker' in navigator)){
-    console.warn('[qandil] This browser has no Service Worker support — no install.');
+    console.warn('[qandel] This browser has no Service Worker support — no install.');
     return;
   }
 
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('sw.js')
       .then(function(reg){
-        console.log('[qandil] service worker registered, scope:', reg.scope);
+        console.log('[qandel] service worker registered, scope:', reg.scope);
 
         /* a waiting worker means a new build is ready but the old
            one is still in control. Tell it to take over. */
@@ -5042,7 +5045,7 @@ function togglePause(){
         });
       })
       .catch(function(err){
-        console.error('[qandil] service worker FAILED to register:', err);
+        console.error('[qandel] service worker FAILED to register:', err);
       });
   });
 
@@ -5228,7 +5231,7 @@ resize();
    actually reached. It must run before `renderLevels`, which is
    the first thing that asks "is this level open?".
    ========================================================= */
-try{ migrateUnlocks(); }catch(e){ console.warn('[qandil] unlock migration failed:', e); }
+try{ migrateUnlocks(); }catch(e){ console.warn('[qandel] unlock migration failed:', e); }
 
 applyI18n();
 renderLevels();

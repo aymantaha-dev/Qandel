@@ -1,4 +1,4 @@
-# Qandil — World, Story and Progression
+# Qandel — World, Story and Progression
 <img width="2816" height="1584" alt="1000133835" src="https://github.com/user-attachments/assets/0d578e76-7dc3-4aa3-93f0-a976b9f14ac0" />
 
 A companion document to `README.md`. This one covers the narrative, the five
@@ -27,7 +27,7 @@ whole thing takes.
 
 ## The Premise
 
-Qandil is a small lantern spirit. It has no name, no face beyond two dark
+Qandel is a small lantern spirit. It has no name, no face beyond two dark
 eyes, and no weapon. It carries one thing: a lantern, held low in one hand,
 and that lantern is the only light left in a place that has gone dark.
 

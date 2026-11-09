@@ -1,4 +1,4 @@
-# Qandil
+# Qandel
 <img width="1584" height="672" alt="1000133839" src="https://github.com/user-attachments/assets/2728b369-85cd-4235-ad2e-59e59d4d4400" />
 
 A lantern-lit platformer built with vanilla HTML, CSS and JavaScript. No
@@ -43,7 +43,7 @@ light it has in its hand.
 
 ## Overview
 
-Qandil (Arabic: قنديل, "lantern") is a 2D side-scrolling platformer built
+Qandel (Arabic: قنديل, "lantern") is a 2D side-scrolling platformer built
 around one tension: the character's visibility is tied to a finite resource.
 Lamp oil drains continuously, and as it drains the world goes dark — the light
 radius shrinks, the surrounding darkness deepens, and the warm tint of the
@@ -612,8 +612,8 @@ Two `localStorage` keys:
 
 | Key | Contents |
 | --- | --- |
-| `qandil.save.v1` | Per-level stars and best time, the unlock record, and settings (sound, music, effects quality, tutorial flags) |
-| `qandil.lang` | Selected language |
+| `qandel.save.v1` | Per-level stars and best time, the unlock record, and settings (sound, music, effects quality, tutorial flags) |
+| `qandel.lang` | Selected language |
 
 Both reads and writes are wrapped in `try/catch`, so the game runs normally in
 private browsing modes where storage may be unavailable or throw.

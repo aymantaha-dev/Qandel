@@ -1,5 +1,5 @@
 /* =========================================================
-   QANDIL — service worker
+   QANDEL — service worker
    ---------------------------------------------------------
    Two jobs, nothing more:
 
@@ -24,7 +24,7 @@
    ========================================================= */
 
 /* bump this string on every deploy — it retires the old cache */
-const VERSION = 'qandil-v4';
+const VERSION = 'qandel-v5';
 const CACHE   = VERSION;
 
 /* The shell. Every file the game needs to boot and be playable
@@ -78,7 +78,7 @@ self.addEventListener('install', function(event){
             .catch(function(){
               /* an optional asset (icon, manifest) is missing —
                  log it in devtools and carry on */
-              console.warn('[qandil sw] skipped (not cached):', url);
+              console.warn('[qandel sw] skipped (not cached):', url);
             });
         })
       ).then(function(){

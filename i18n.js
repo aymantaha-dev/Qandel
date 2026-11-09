@@ -58,7 +58,7 @@ const I18N = {
     "tut.goal.body":"الباب المضيء في نهاية المرحلة هو هدفك. ابلغه قبل نفاد الزيت، واحذر كل ما سبق — لمسة واحدة تعيدك إلى نقطة الحفظ. كل مرحلة تقدم لك فخاخًا أكثر وأسرع، لكن القواعد نفسها لا تتغير."
   },
   en: {
-    "app.title":"QANDIL","app.subtitle":"Journey of Light",
+    "app.title":"QANDEL","app.subtitle":"Journey of Light",
     "menu.play":"Begin Journey","menu.continue":"Continue","menu.levels":"Levels",
     "menu.settings":"Settings","menu.credits":"About",
     "menu.stars":"stars","menu.levelsDone":"levels",
@@ -76,7 +76,7 @@ const I18N = {
     "result.needStars":"You need {n} stars to open the next level. You earned {got} — retry and collect every gem.",
     "result.final":"Journey complete!",
     "credits.title":"About",
-    "credits.body":"Qandil is a light-driven puzzle platformer. You are a small lantern spirit bringing light back to dark, abandoned houses. Collect gems, keep your lamp oiled, avoid the hazards, and reach the glowing door.\n\nFive worlds, twenty-five levels, three stars each.\n\n── The hazards ──\n\n• Spikes — red rows on the ground; one touch kills.\n• Fire — orange flames that light and die on a steady rhythm; cross while they are out.\n• Lava — molten orange pools that never go out; cross on the stones.\n• Saws — a spinning metal disc on a fixed path, sliding or bobbing.\n• Nails — short dense rows, on the floor or hanging from the ceiling.\n• Fragile platforms — crumble after a variable delay; the cracks glow before they give way.\n• Moving platforms — carry you over voids; their motion is regular and learnable.\n\nEvery hazard appears from the very first level in its simplest form, then gains speed, count and severity as you progress — until level twenty-five, where everything is at its most extreme. The rules never change: every hazard is visible before it can kill you.\n\nMade by Trex · Kivode",
+    "credits.body":"Qandel is a light-driven puzzle platformer. You are a small lantern spirit bringing light back to dark, abandoned houses. Collect gems, keep your lamp oiled, avoid the hazards, and reach the glowing door.\n\nFive worlds, twenty-five levels, three stars each.\n\n── The hazards ──\n\n• Spikes — red rows on the ground; one touch kills.\n• Fire — orange flames that light and die on a steady rhythm; cross while they are out.\n• Lava — molten orange pools that never go out; cross on the stones.\n• Saws — a spinning metal disc on a fixed path, sliding or bobbing.\n• Nails — short dense rows, on the floor or hanging from the ceiling.\n• Fragile platforms — crumble after a variable delay; the cracks glow before they give way.\n• Moving platforms — carry you over voids; their motion is regular and learnable.\n\nEvery hazard appears from the very first level in its simplest form, then gains speed, count and severity as you progress — until level twenty-five, where everything is at its most extreme. The rules never change: every hazard is visible before it can kill you.\n\nMade by Trex · Kivode",
     "rotate":"Rotate your device to play",
 
     "gameover.title":"Out of hearts",
@@ -118,7 +118,7 @@ const I18N = {
 };
 
 let LANG = (function(){
-  try { return localStorage.getItem('qandil.lang') || 'ar'; } catch(e){ return 'ar'; }
+  try { return localStorage.getItem('qandel.lang') || 'ar'; } catch(e){ return 'ar'; }
 })();
 
 function t(key){
@@ -139,6 +139,6 @@ function applyI18n(){
 
 function setLang(l){
   LANG = l;
-  try { localStorage.setItem('qandil.lang', l); } catch(e){}
+  try { localStorage.setItem('qandel.lang', l); } catch(e){}
   applyI18n();
 }

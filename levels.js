@@ -1,4 +1,4 @@
-/* Qandil — level data + deterministic, hand-designed segment builder
+/* Qandel — level data + deterministic, hand-designed segment builder
    =========================================================
    DESIGN CONTRACT
    ---------------
