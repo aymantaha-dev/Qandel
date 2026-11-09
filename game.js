@@ -8,9 +8,20 @@
    ========================================================= */
 
 const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+const mainCtx = canvas.getContext('2d');
+/* `ctx` is the ACTIVE draw target. The play scene is painted into
+   sceneCx (offscreen) and composited once per frame; the menu and the
+   post stack paint straight onto the display canvas.
+   An offscreen canvas is only ever sampled as a texture — reading the
+   DISPLAYED canvas back (which the bloom pass used to do) forces the
+   compositor to sync and is what made the frame stutter. */
+let ctx = mainCtx;
+const sceneCv = document.createElement('canvas');
+const sceneCx = sceneCv.getContext('2d');
 const darkCv = document.createElement('canvas');
 const darkCx = darkCv.getContext('2d');
+/* the darkness layer is a soft mask — half resolution is invisible */
+const DARK_SCALE = 0.5;
 let DPR = 1;
 /* VW/VH = the canvas surface in CSS pixels (what we actually paint on).
    VIEW_W/VIEW_H = the world window in world units (authored at 540 tall).
@@ -143,14 +154,12 @@ function starsOf(i){ const r=save.levels[i]; return r? (r.stars||0) : 0; }
    walking the map.
    ========================================================= */
 /* =========================================================
-   THE PASS MARK — what a level must earn to open the next one.
+   THERE IS NO PASS MARK.
    ---------------------------------------------------------
-   One star is a survival. Two stars means every gem in the level
-   was collected. Three means it was also done inside par time.
-   Only two and above are worth a door.
+   Reaching the door is the whole requirement. Stars still record how
+   well a level was played, but they no longer decide whether the next
+   level opens.
    ========================================================= */
-const PASS_STARS = 2;
-
 function markUnlocked(i){
   if(i < 0 || i >= LEVELS.length) return;
   save.unlocked = save.unlocked || {};
@@ -168,9 +177,9 @@ function unlocked(i){
   /* ---- 1 · the explicit record wins ---- */
   if(save.unlocked && save.unlocked[i]) return true;
 
-  /* ---- 2 · legacy saves: the previous level must have been cleared
-              at the pass mark, exactly like a live run ---- */
-  if(starsOf(i-1) >= PASS_STARS){
+  /* ---- 2 · legacy saves: any recorded star proves the previous level
+              was cleared, which is now all that is required ---- */
+  if(starsOf(i-1) > 0){
     save.unlocked = save.unlocked || {};
     save.unlocked[i] = 1;
     if(save.maxUnlocked === undefined || i > save.maxUnlocked) save.maxUnlocked = i;
@@ -205,9 +214,9 @@ function migrateUnlocks(){
   for(let i=0;i<LEVELS.length;i++){
     const st = starsOf(i);
     if(st > 0) save.unlocked[i] = 1;          /* played → open to replay */
-    if(st >= PASS_STARS && i > highest) highest = i;
+    if(st > 0 && i > highest) highest = i;
   }
-  /* only a level cleared at the pass mark hands out the one after it */
+  /* any cleared level hands out the one after it */
   if(highest > -1 && highest + 1 < LEVELS.length){
     save.unlocked[highest + 1] = 1;
   }
@@ -228,22 +237,29 @@ const AU={
       this.master.gain.value=.55; this.master.connect(this.ac.destination);
     }catch(e){} },
   resume(){ try{ if(this.ac&&this.ac.state==='suspended') this.ac.resume(); }catch(e){} },
-  tone(f,d,type,vol,to){
+  /* `delay` schedules on the AUDIO clock instead of on setTimeout, so a
+     two-note figure cannot be split apart by a busy main thread. */
+  tone(f,d,type,vol,to,delay){
     if(!this.on) return; this.init(); if(!this.ac) return;
-    const ac=this.ac, t=ac.currentTime;
+    const ac=this.ac, t=ac.currentTime+(delay||0);
     const o=ac.createOscillator(), g=ac.createGain();
     o.type=type||'sine'; o.frequency.setValueAtTime(f,t);
     if(to) o.frequency.exponentialRampToValueAtTime(Math.max(30,to), t+d);
     g.gain.setValueAtTime(.0001,t);
     g.gain.exponentialRampToValueAtTime(vol||.16, t+.012);
     g.gain.exponentialRampToValueAtTime(.0001, t+d);
-    o.connect(g); g.connect(this.master); o.start(t); o.stop(t+d+.04);
+    o.connect(g); g.connect(this.master);
+    /* a finished tone that is never disconnected stays in the audio graph
+       for the life of the context — hundreds of dead nodes after a
+       minute of play, all walked every render quantum */
+    o.onended = function(){ try{ o.disconnect(); g.disconnect(); }catch(e){} };
+    o.start(t); o.stop(t+d+.04);
   },
   jump(){ this.tone(300,.16,'triangle',.12,520); },
-  gem(){ this.tone(880,.10,'sine',.14); const s=this; setTimeout(()=>s.tone(1320,.14,'sine',.11),55); },
+  gem(){ this.tone(880,.10,'sine',.14); this.tone(1320,.14,'sine',.11,undefined,.055); },
   oil(){ this.tone(200,.22,'sawtooth',.07,420); },
   die(){ this.tone(320,.42,'sawtooth',.11,60); },
-  win(){ const s=this; [523,659,784,1046].forEach((f,i)=>setTimeout(()=>s.tone(f,.26,'triangle',.14),i*95)); },
+  win(){ [523,659,784,1046].forEach((f,i)=>this.tone(f,.26,'triangle',.14,undefined,i*0.095)); },
   click(){ this.tone(620,.05,'square',.04); }
 };
 AU.on = save.settings.sound !== false;
@@ -313,7 +329,10 @@ const MUS={
     if(!this.running){
       this.running = true;
       this.nextT = Math.max(this.nextT, now + 0.05);
-      this.timer = setInterval(()=>this.tick(), 120);
+      /* the sequencer schedules 0.8s ahead, so it only has to wake up
+         often enough to stay ahead of that — not 8 times a second, where
+         every wake-up competes with the render thread */
+      this.timer = setInterval(()=>this.tick(), 250);
     }
   },
   stop(){
@@ -348,6 +367,7 @@ const MUS={
     const f = c.createBiquadFilter();
     f.type = 'lowpass'; f.frequency.value = 1100; f.Q.value = 0.6;
 
+    const voices = [];
     [0, 0.4, -0.4].forEach((cents, i)=>{
       const o = c.createOscillator();
       o.type = i === 0 ? 'sine' : 'triangle';
@@ -355,7 +375,17 @@ const MUS={
       o.detune.setValueAtTime(cents * 4, t);
       o.connect(f);
       o.start(t); o.stop(t + dur + 0.2);
+      voices.push(o);
     });
+
+    /* the pad's filter and gain stay connected to the bus forever unless
+       something tears them down once the notes have finished */
+    voices[voices.length - 1].onended = function(){
+      try{
+        voices.forEach(function(v){ v.disconnect(); });
+        f.disconnect(); g.disconnect();
+      }catch(e){}
+    };
 
     f.connect(g);
     g.gain.setValueAtTime(0.0001, t);
@@ -377,6 +407,7 @@ const MUS={
     o.connect(g); o2.connect(g); g.connect(this.out);
     o.start(t); o.stop(t + dur + 0.05);
     o2.start(t); o2.stop(t + dur + 0.05);
+    o2.onended = function(){ try{ o.disconnect(); o2.disconnect(); g.disconnect(); }catch(e){} };
   },
 
   /* warm round bass */
@@ -390,12 +421,20 @@ const MUS={
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g); g.connect(this.out);
     o.start(t); o.stop(t + dur + 0.05);
+    o.onended = function(){ try{ o.disconnect(); g.disconnect(); }catch(e){} };
   },
 
   /* ---- sequencer ---- */
   tick(){
     if(!this.ctx || !this.on || !this.running) return;
     const c = this.ctx;
+
+    /* a throttled tab can leave `nextT` seconds in the past — scheduling
+       every missed eighth at once would machine-gun the whole bar */
+    if(this.nextT < c.currentTime - 0.2){
+      this.nextT = c.currentTime + 0.05;
+    }
+
     const beat = 60 / this.bpm;          /* quarter note */
     const eighth = beat / 2;
 
@@ -524,6 +563,22 @@ function resize(){
   const vw = portrait ? h : w;
   const vh = portrait ? w : h;
 
+  /* =========================================================
+     A RESIZE THAT LANDS ON THE SAME BOX MUST NOTHING.
+     ---------------------------------------------------------
+     Assigning `canvas.width` does not just set a number: it
+     tears down the backing store, reallocates it, resets the
+     transform and clears the surface. Doing that for the main
+     canvas AND the scene AND the darkness buffer is tens of
+     milliseconds on a phone.
+     Mobile browsers fire `resize` continuously while the URL
+     bar slides, at sizes that are often identical to the one
+     already in place. Those events are now free.
+     ========================================================= */
+  if(vw === VW && vh === VH && canvas.width === Math.round(vw*DPR)){
+    return;
+  }
+
   /* The drawing surface is the canvas itself, in CSS pixels.
      VW/VH MUST equal the canvas CSS size, otherwise the scene is drawn
      into a smaller rectangle and the rest of the screen stays black.
@@ -536,9 +591,13 @@ function resize(){
   canvas.height=Math.round(vh*DPR);
   canvas.style.width='100%';
   canvas.style.height='100%';
-  darkCv.width=canvas.width; darkCv.height=canvas.height;
-  ctx.setTransform(DPR,0,0,DPR,0,0);
-  darkCx.setTransform(DPR,0,0,DPR,0,0);
+  sceneCv.width=canvas.width; sceneCv.height=canvas.height;
+  /* half-res mask: the fill cost of the heaviest per-frame pass drops 4x */
+  darkCv.width=Math.max(1,Math.round(canvas.width*DARK_SCALE));
+  darkCv.height=Math.max(1,Math.round(canvas.height*DARK_SCALE));
+  mainCtx.setTransform(DPR,0,0,DPR,0,0);
+  sceneCx.setTransform(DPR,0,0,DPR,0,0);
+  darkCx.setTransform(DPR*DARK_SCALE,0,0,DPR*DARK_SCALE,0,0);
 
   /* world units -> screen units */
   SCALE = vh / BASE_H;
@@ -550,8 +609,9 @@ function resize(){
      show empty space on wide screens. */
   if(cur) S.cam = clamp(S.cam, 0, Math.max(0, cur.L.wd-VIEW_W));
 }
-window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', ()=>setTimeout(resize,150));
+/* (the resize listeners live in `refit`, below — `resize` used to be
+   bound here as well, so every event ran the full reallocation chain
+   once directly and then three more times through `refit`) */
 
 /* =========================================================
    RESIZE THAT ACTUALLY LANDS
@@ -1354,34 +1414,49 @@ function win(){
     persist();
   }
   /* =========================================================
-     A LEVEL IS EARNED, NOT JUST FINISHED
+     FINISHING A LEVEL OPENS THE NEXT ONE — ALWAYS
      ---------------------------------------------------------
-     Reaching the door is not enough. The next level opens only on
-     a run worth keeping: two stars or three. One star means the
-     level was survived, not mastered — the door stays shut and the
-     player replays it.
-
-     Stars are 1 for arriving, +1 for every gem, +1 for beating par
-     with every gem. So two stars means the gems were collected, and
-     three means the gems were collected inside the time limit.
+     Reaching the door is the requirement, and the only one. Stars
+     still record how well the level was played (1 for arriving,
+     +1 for every gem, +1 for beating par with every gem), but they
+     no longer gate progress: a one-star run opens the next level
+     exactly like a three-star run.
      ========================================================= */
-  const passMark = stars >= 2;
-  if(passMark && S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
+  if(S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
 
   /* S.result must be BUILT here, before anything reads it — the two
      assignment lines that used to sit above this block wrote into
      `null` and threw a TypeError before the result screen could ever
      be reached. The pass mark is set on the object as it is created. */
-  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio,
-            passMark:passMark, passStars:PASS_STARS};
+  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio};
   setTimeout(()=>{ showResult(); }, 620);
 }
 
 /* ---------------- drawing ---------------- */
+/* =========================================================
+   SKY GRADIENT — cached as a 2px strip.
+   The base sky is horizontally uniform, so a 2px wide ramp
+   stretched across the viewport is pixel-identical to a
+   full-screen gradient fill — and it removes one gradient
+   allocation and one full-screen fill from every frame.
+   Rebuilt only when the world or the viewport height changes.
+   ========================================================= */
+const skyCv = document.createElement('canvas');
+const skyCx = skyCv.getContext('2d');
+let skyKey = '';
+
 function drawSky(W){
-  const g=ctx.createLinearGradient(0,0,0,VIEW_H);
-  g.addColorStop(0,W.skyTop); g.addColorStop(.62,W.fog); g.addColorStop(1,W.skyBot);
-  ctx.fillStyle=g; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  const hpx = Math.max(1, Math.round(VIEW_H * SCALE * DPR));
+  const key = (W.id || 'clay') + '|' + hpx;
+  if(key !== skyKey){
+    skyCv.width = 2; skyCv.height = hpx;
+    const sg = skyCx.createLinearGradient(0,0,0,hpx);
+    sg.addColorStop(0, W.skyTop); sg.addColorStop(.62, W.fog); sg.addColorStop(1, W.skyBot);
+    skyCx.fillStyle = sg;
+    skyCx.fillRect(0,0,2,hpx);
+    skyKey = key;
+  }
+  ctx.drawImage(skyCv, 0,0, 2, skyCv.height, 0,0, VIEW_W, VIEW_H);
 
   /* a second atmosphere layer unique to each world */
   const style = W.id || 'clay';
@@ -3530,7 +3605,9 @@ function buildTintSprite(){
 function drawDarkness(W){
   if(!holeReady) buildHoleSprite();
   const d=darkCx;
-  d.setTransform(DPR,0,0,DPR,0,0);
+  /* drawn at DARK_SCALE — every coordinate below stays in plain screen
+     pixels, only the transform shrinks */
+  d.setTransform(DPR*DARK_SCALE,0,0,DPR*DARK_SCALE,0,0);
   d.clearRect(0,0,VW,VH);
   /* =========================================================
      AMBIENT DARKNESS SCALES WITH THE OIL
@@ -3690,7 +3767,7 @@ function drawDarkness(W){
   /* the dark layer already lives in screen pixels — draw it 1:1 */
   ctx.save();
   ctx.globalCompositeOperation='source-over';
-  ctx.drawImage(darkCv, 0,0, VW, VH, 0,0, VW, VH);
+  ctx.drawImage(darkCv, 0,0, darkCv.width, darkCv.height, 0,0, VW, VH);
   ctx.restore();
 
     /* =========================================================
@@ -3867,7 +3944,7 @@ function drawBloom(strength){
   bloomCx.globalCompositeOperation = 'source-over';
   bloomCx.globalAlpha = 1;
   bloomCx.clearRect(0, 0, bloomCv.width, bloomCv.height);
-  bloomCx.drawImage(canvas, 0, 0, bloomCv.width, bloomCv.height);
+  bloomCx.drawImage(sceneCv, 0, 0, bloomCv.width, bloomCv.height);
 
   /* 2 · and tinier — this is where the blur comes from */
   bloom2Cx.globalCompositeOperation = 'source-over';
@@ -4102,11 +4179,14 @@ function render(dt){
     if(!cur) return;
     const W=cur.W;
 
-    /* 1) clear the entire canvas so no stale pixels survive */
+    /* PASS A — the scene is painted into the offscreen target */
+    ctx = sceneCx;
+
+    /* 1) clear the entire scene so no stale pixels survive */
     screenTransform();
     ctx.save();
     ctx.setTransform(1,0,0,1,0,0);
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.clearRect(0,0,sceneCv.width,sceneCv.height);
     ctx.restore();
 
     /* 2) everything below is drawn in WORLD units, scaled to the screen */
@@ -4193,10 +4273,21 @@ function render(dt){
        ones that cost anything are skipped by the "low" effects
        setting the player can already choose in Settings.
        ========================================================= */
+    /* PASS B — composite the finished scene once, then the post stack
+       on the display canvas. Bloom now samples sceneCv instead of the
+       displayed canvas, so there is no GPU->CPU readback per frame. */
+    ctx = mainCtx;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0,0,VW,VH);
+    ctx.drawImage(sceneCv, 0,0, sceneCv.width, sceneCv.height, 0,0, VW, VH);
+
     drawBloom(0.34);
     drawGrade();
     drawGrain();
   } else {
+    ctx = mainCtx;
     screenTransform();
     renderMenuScreen(dt);
   }
@@ -4665,39 +4756,38 @@ function showResult(){
   qs('#res-time').textContent = fmt(r.time);
 
   /* =========================================================
-     THE RESULT SCREEN MUST SAY WHY THE DOOR IS SHUT
+     THE RESULT SCREEN ALWAYS OFFERS THE NEXT LEVEL
      ---------------------------------------------------------
-     A player who finishes a level and finds the next one still
-     locked needs the reason on screen, not in a wiki. The subtitle
-     states the pass mark and the current count; the "next" button
-     becomes "retry" when the mark was not met, so the only obvious
-     action is the one that helps.
+     There is no pass mark, so the button always advances. The only
+     level with nowhere to go is the last one, and there the same
+     button returns to the menu. The subtitle just confirms the door
+     is open.
      ========================================================= */
   const isFinal = (S.level === LEVELS.length-1);
-  const passed  = (r.stars >= PASS_STARS);
 
   const sub = qs('#res-sub');
   if(sub){
-    if(isFinal){
-      sub.textContent = '';
-    } else if(passed){
-      sub.textContent = t('result.passed');
-    } else {
-      sub.textContent = t('result.needStars')
-        .replace('{n}', String(PASS_STARS))
-        .replace('{got}', String(r.stars));
-    }
+    sub.textContent = isFinal ? '' : t('result.passed');
   }
+
+  /* =========================================================
+     THE REPLAY NUDGE
+     ---------------------------------------------------------
+     A level finished on one or two stars is open-ended: the
+     remaining stars are still out there. The card says so in one
+     line, with a star for an icon, and does nothing else — no
+     button, no modal, no forced replay. Advancing is still the
+     same single click it always was.
+     ========================================================= */
+  const nudge = qs('#res-nudge');
+  if(nudge) nudge.hidden = (r.stars >= 3);
 
   const nextBtn=qs('#btn-next');
   const nextLabel=nextBtn.querySelector('span');
   if(nextLabel){
-    nextLabel.textContent = isFinal
-      ? t('result.menu')
-      : (passed ? t('result.next') : t('result.retry'));
+    nextLabel.textContent = isFinal ? t('result.menu') : t('result.next');
   }
-  /* the same button, two jobs: advance, or go back and earn it */
-  nextBtn.dataset.mode = (isFinal || passed) ? 'next' : 'retry';
+  nextBtn.dataset.mode = 'next';
 
   qs('#ov-result').hidden=false;
   S.playing=false;
@@ -4900,7 +4990,10 @@ function bindHold(el, on){
   let held = false;
 
   const press = (e)=>{
-    if(e.cancelable) e.preventDefault();
+    /* `touch-action:none` on the pads already suppresses scroll and
+       zoom, so preventDefault here bought nothing — and on Android it
+       forfeits the browser's fast-tap path, which is a frame of lag
+       on every single press. */
     if(held) return;
     held = true;
 
@@ -4927,7 +5020,6 @@ function bindHold(el, on){
     }
   };
   const release = (e)=>{
-    if(e && e.cancelable) e.preventDefault();
     if(!held) return;
     held = false;
     /* release the input before touching the DOM, same reason */
@@ -5154,11 +5246,7 @@ qs('#btn-quit').addEventListener('click', function(){ AU.click(); qs('#ov-pause'
 
 qs('#btn-next').addEventListener('click', function(){
   AU.click();
-  const btn = qs('#btn-next');
   qs('#ov-result').hidden=true;
-
-  /* the button serves two jobs — see showResult() */
-  if(btn.dataset.mode === 'retry'){ startLevel(S.level); return; }
 
   if(S.level>=LEVELS.length-1){ goMenu(); renderLevels(); }
   else startLevel(S.level+1);
@@ -5182,6 +5270,7 @@ window.onLangApplied=function(){
 
 /* ---------------- loop ---------------- */
 let last=performance.now();
+let hudAcc = 0;
 function frame(now){
   let dt=(now-last)/1000; last=now;
   /* clamp only pathological spikes (tab switch), not normal jitter —
@@ -5196,7 +5285,12 @@ function frame(now){
   if(S.screen==='play' && !S.paused && !S.finished){
     if(!cur) loadLevel(S.level);
     update(dt);
-    updateHUD();
+    /* the HUD is DOM, and the oil bar changes on EVERY frame — writing
+       it at 60Hz is a layout pass per frame for a number the player reads
+       once a second. Every path that must be instant (death, checkpoint,
+       level start) already calls updateHUD() directly. */
+    hudAcc += dt;
+    if(hudAcc >= 0.1){ hudAcc = 0; updateHUD(); }
     TUT.update(dt);
   }
   if(S.screen==='play' && !S.paused && S.finished){

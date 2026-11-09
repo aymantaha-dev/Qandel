@@ -394,9 +394,22 @@ html[dir="rtl"] .btn.primary::after{
 }
 #hud[hidden]{display:none}
 .hud-left,.hud-right{display:flex;align-items:center;gap:10px;pointer-events:auto}
+/* =========================================================
+   NO backdrop-filter OVER A LIVE CANVAS
+   ---------------------------------------------------------
+   These boxes sit on top of a canvas that repaints every
+   frame. `backdrop-filter` means "read what is behind me and
+   blur it" — so the compositor was re-blurring these regions
+   60 times a second. With five such regions on screen (two
+   HUD boxes + three pads) that was the single largest cost
+   left in the frame, and it is what made the controls feel
+   laggy: the press was registered, but the screen could not
+   keep up with it.
+   A slightly denser flat fill reads the same and is free.
+   ========================================================= */
 .hud-left,.hud-right{
-  background:rgba(12,9,18,.58);border:1px solid rgba(255,255,255,.07);
-  border-radius:14px;padding:7px 12px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  background:rgba(10,7,16,.82);border:1px solid rgba(255,255,255,.07);
+  border-radius:14px;padding:7px 12px;
 }
 .hud-level{display:flex;flex-direction:column;line-height:1.2}
 .hud-level b{font-size:13px;font-weight:800}
@@ -508,6 +521,55 @@ html[dir="rtl"] .btn.primary::after{
 }
 .res-sub:empty{display:none}
 
+/* =========================================================
+   THE SUBTITLE IS PINNED TO THE CENTRE.
+   ---------------------------------------------------------
+   `#res-sub` rather than `.res-sub`: the id selector outranks
+   the `.overlay p` rule, so no inherited alignment or box
+   width can pull this one short sentence towards the
+   inline-start edge.
+   ========================================================= */
+#res-sub{
+  text-align:center;
+  width:100%;
+  max-width:36ch;
+  margin-inline:auto;
+}
+
+/* =========================================================
+   REPLAY NUDGE
+   ---------------------------------------------------------
+   One sentence, one star, no button and no default action.
+   The player advances with the same button as always and comes
+   back to the level whenever they want the missing stars.
+   Selector is `.overlay .res-nudge` so it outranks `.overlay p`
+   for the margin, size and colour.
+   ========================================================= */
+.overlay .res-nudge{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  width:fit-content;
+  max-width:100%;
+  margin:0 auto clamp(10px,1.8vh,14px);
+  padding:7px 13px;
+  border-radius:11px;
+  background:rgba(255,201,120,.07);
+  border:1px solid rgba(255,201,120,.18);
+  font-size:clamp(11px,1.55vh,12.5px);
+  line-height:1.6;
+  color:#e8cfa8;
+  text-align:center;
+}
+.overlay .res-nudge[hidden]{display:none}
+.overlay .res-nudge .ic{
+  width:13px;height:13px;
+  flex:0 0 auto;
+  color:var(--gold);
+  filter:drop-shadow(0 0 6px rgba(255,201,120,.55));
+}
+
 /* ============ RESULTS ============ */
 .stars-big{
   display:flex;justify-content:center;
@@ -585,11 +647,11 @@ html[dir="rtl"] .btn.primary::after{
   width:clamp(58px,10vh,76px);height:clamp(58px,10vh,76px);border-radius:50%;
   display:grid;place-items:center;
   border:1px solid rgba(255,201,120,.42);
-  background:radial-gradient(circle at 50% 30%,rgba(60,42,80,.34),rgba(16,11,24,.30));
+  /* opaque enough to replace the blur it used to rely on */
+  background:radial-gradient(circle at 50% 30%,rgba(52,36,70,.88),rgba(14,9,21,.86));
   color:var(--txt);
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   box-shadow:0 6px 18px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.14);
-  transition:transform .09s ease-out, opacity .09s ease-out, border-color .12s;
+  transition:transform .06s ease-out, border-color .12s;
   touch-action:none;-webkit-touch-callout:none;
   will-change:transform;
 }
@@ -603,7 +665,7 @@ html[dir="rtl"] .btn.primary::after{
 .tbtn .ic{transform:none}
 .tbtn.jump{
   width:clamp(70px,12vh,92px);height:clamp(70px,12vh,92px);
-  background:radial-gradient(circle at 50% 30%,rgba(255,190,110,.22),rgba(90,50,14,.30));
+  background:radial-gradient(circle at 50% 30%,rgba(255,190,110,.30),rgba(78,43,12,.88));
   border-color:rgba(255,201,120,.55);
   box-shadow:0 8px 22px rgba(232,147,63,.22),inset 0 1px 0 rgba(255,255,255,.2);
 }
