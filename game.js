@@ -260,7 +260,31 @@ const AU={
   oil(){ this.tone(200,.22,'sawtooth',.07,420); },
   die(){ this.tone(320,.42,'sawtooth',.11,60); },
   win(){ [523,659,784,1046].forEach((f,i)=>this.tone(f,.26,'triangle',.14,undefined,i*0.095)); },
-  click(){ this.tone(620,.05,'square',.04); }
+  click(){ this.tone(620,.05,'square',.04); },
+  /* =========================================================
+     FOOTSTEPS — a function of the MATERIAL under the feet
+     ---------------------------------------------------------
+     Nothing in the game said "you are walking on mud brick"
+     rather than "on marble". One very short tone per step, tuned
+     per world, is the cheapest possible way to say it — and at
+     this volume it is felt rather than heard.
+
+     `mat` is the world id, which is already the key every other
+     material table in the game uses.
+     ========================================================= */
+  step(mat){
+    if(!this.on) return;
+    /* [frequency, duration, wave, glide-to] */
+    const V = {
+      clay  : [150, .045, 'triangle',  92],
+      mosque: [268, .040, 'sine',     190],
+      market: [196, .038, 'triangle', 148],
+      ruins : [118, .048, 'square',    78],
+      tower : [104, .052, 'square',    66]
+    };
+    const v = V[mat] || V.clay;
+    this.tone(v[0], v[1], v[2], 0.020, v[3]);
+  }
 };
 AU.on = save.settings.sound !== false;
 
@@ -275,14 +299,67 @@ const MUS={
   ctx:null, out:null, lp:null, timer:null, nextT:0, step:0,
   bpm:70, mood:0, running:false,
 
-  /* A minor, natural — warm and calm. Frequencies in Hz. */
-  /* chord progression: Am – F – C – G  (i – VI – III – VII) */
-  chords:[
-    { root:110.00, notes:[220.00, 261.63, 329.63] }, /* A3  C4  E4  — Am */
-    { root: 87.31, notes:[174.61, 220.00, 261.63] }, /* F3  A3  C4  — F  */
-    { root:130.81, notes:[196.00, 261.63, 329.63] }, /* G3  C4  E4  — C  */
-    { root: 98.00, notes:[196.00, 246.94, 293.66] }  /* G3  B3  D4  — G  */
+  /* =========================================================
+     FIVE PROGRESSIONS — one per world
+     ---------------------------------------------------------
+     `setMood()` used to do nothing but raise the tempo from 70 to
+     82 BPM, so all five worlds played the SAME four chords at a
+     marginally different speed. A player spends ten minutes in
+     each world; the harmony is the single strongest cue that they
+     have actually gone somewhere.
+
+     Each progression is a four-chord loop in a different key with
+     a different emotional colour:
+
+       0 · Clay House    A minor   warm, open, unhurried
+       1 · Old Mosque    D minor   drier, slower, solemn
+       2 · The Market    E minor   brighter, busier, in motion
+       3 · Ruined Court  B minor   low, cold, unresolved
+       4 · Lantern Tower A minor   but rising — Dm and E pull the
+                                   loop upward instead of home
+
+     All frequencies are in Hz and stay inside the piano's range.
+     ========================================================= */
+  progressions:[
+    [
+      { root:110.00, notes:[220.00, 261.63, 329.63] },
+      { root: 87.31, notes:[174.61, 220.00, 261.63] },
+      { root:130.81, notes:[196.00, 261.63, 329.63] },
+      { root: 98.00, notes:[196.00, 246.94, 293.66] }
+    ],
+    [
+      { root: 73.42, notes:[146.83, 174.61, 220.00] },
+      { root: 58.27, notes:[116.54, 146.83, 174.61] },
+      { root: 87.31, notes:[174.61, 220.00, 261.63] },
+      { root:130.81, notes:[196.00, 261.63, 329.63] }
+    ],
+    [
+      { root: 82.41, notes:[164.81, 196.00, 246.94] },
+      { root:130.81, notes:[196.00, 261.63, 329.63] },
+      { root: 98.00, notes:[196.00, 246.94, 293.66] },
+      { root: 73.42, notes:[146.83, 185.00, 220.00] }
+    ],
+    [
+      { root: 61.74, notes:[123.47, 146.83, 185.00] },
+      { root: 98.00, notes:[196.00, 246.94, 293.66] },
+      { root: 73.42, notes:[146.83, 185.00, 220.00] },
+      { root:110.00, notes:[220.00, 277.18, 329.63] }
+    ],
+    [
+      { root:110.00, notes:[220.00, 261.63, 329.63] },
+      { root: 87.31, notes:[174.61, 220.00, 261.63] },
+      { root: 73.42, notes:[146.83, 174.61, 220.00] },
+      { root: 82.41, notes:[164.81, 207.65, 246.94] }
+    ]
   ],
+  chords:[
+    { root:110.00, notes:[220.00, 261.63, 329.63] },
+    { root: 87.31, notes:[174.61, 220.00, 261.63] },
+    { root:130.81, notes:[196.00, 261.63, 329.63] },
+    { root: 98.00, notes:[196.00, 246.94, 293.66] }
+  ],
+
+  
 
   /* ---- lifecycle ---- */
   start(){
@@ -338,6 +415,7 @@ const MUS={
   stop(){
     this.running = false;
     if(this.timer){ clearInterval(this.timer); this.timer = null; }
+    try{ this.warnOff(); }catch(e){}
     if(!this.ctx || !this.out) return;
     const now = this.ctx.currentTime;
     try{
@@ -357,7 +435,13 @@ const MUS={
       }catch(e){}
     }
   },
-  setMood(m){ this.mood = m; this.bpm = 70 + m * 3; },
+  setMood(m){
+    this.mood = m;
+    this.bpm = 70 + m * 3;
+    /* each world gets its own harmony, not a faster reading of the
+       same four chords */
+    this.chords = this.progressions[m] || this.progressions[0];
+  },
 
   /* ---- voices ---- */
   /* soft sustained pad — 3 detuned oscillators through their own filter */
@@ -422,6 +506,49 @@ const MUS={
     o.connect(g); g.connect(this.out);
     o.start(t); o.stop(t + dur + 0.05);
     o.onended = function(){ try{ o.disconnect(); g.disconnect(); }catch(e){} };
+  },
+
+  /* =========================================================
+     LOW-OIL DRONE
+     ---------------------------------------------------------
+     A dying lamp should be audible before it is visible. Two
+     detuned sines an octave apart, gated by the oil level from
+     the frame loop.
+
+     The nodes are created lazily on the first call and then LEFT
+     ALIVE for the life of the audio context — this is the one
+     place where a permanent node is correct, because the drone is
+     a sustained voice, not a one-shot. Its gain is the only thing
+     that moves.
+     ========================================================= */
+  warnOsc:null, warnGain:null,
+
+  warn(level){
+    if(!this.on || !this.ctx || !AU.ac) return;
+    if(!this.warnGain){
+      try{
+        const c = this.ctx;
+        const g = c.createGain();
+        g.gain.value = 0.0001;
+        const a = c.createOscillator(); a.type = 'sine';     a.frequency.value = 46;
+        const b = c.createOscillator(); b.type = 'triangle'; b.frequency.value = 69;
+        a.connect(g); b.connect(g); g.connect(AU.master);
+        a.start(); b.start();
+        this.warnOsc = [a, b];
+        this.warnGain = g;
+      }catch(e){ return; }
+    }
+    try{
+      this.warnGain.gain.setTargetAtTime(Math.max(0.0001, level),
+                                        this.ctx.currentTime, 0.5);
+    }catch(e){}
+  },
+
+  warnOff(){
+    if(!this.warnGain || !this.ctx) return;
+    try{
+      this.warnGain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.25);
+    }catch(e){}
   },
 
   /* ---- sequencer ---- */
@@ -828,6 +955,9 @@ function loadLevel(i){
   S.cam=clamp(P.x+P.w/2-VIEW_W/2, 0, Math.max(0,L.wd-VIEW_W));
 
   if(MUS.on) MUS.setMood(Math.min(3, Math.floor(i/5)));
+
+  /* the interface takes the colour of the place it is standing in */
+  try{ applyWorldTint(cur.W); }catch(e){}
 }
 
 /* ---------------- physics ---------------- */
@@ -1083,6 +1213,17 @@ function update(dt){
   /* landing refills the double jump */
   if(grounded) P.jumps=MAX_JUMPS;
 
+  /* ---- footsteps, measured in world units travelled ---- */
+  if(P.onGround && Math.abs(P.vx) > 40){
+    stepAcc += Math.abs(P.vx) * dt;
+    if(stepAcc > 96){
+      stepAcc = 0;
+      AU.step(cur.W.id);
+    }
+  } else {
+    stepAcc = Math.min(stepAcc, 60);
+  }
+
   P.squash = lerp(P.squash, 1, 1-Math.pow(0.001,dt));
   P.anim += dt*(Math.abs(P.vx)/SPEED)*10 + dt*2;
 
@@ -1325,6 +1466,8 @@ function update(dt){
       setTimeout(()=>AU.tone(990,.16,'sine',.09),70);
       burst(c.x,c.y,'#9fe8ff',16);
       updateHUD();
+      /* the respawn point is now recorded — say so, once, quietly */
+      try{ toast(t('toast.saved')); }catch(e){}
     }
   }
 
@@ -1355,6 +1498,13 @@ function update(dt){
   /* oil drain: 100 units lasts ~62s, which comfortably covers a level
      at the new length while still punishing a player who ignores flasks */
   S.oil = Math.max(0, S.oil - dt*1.6);
+
+  /* ---- the lamp warns before it dies ---- */
+  if(MUS.on){
+    const warnLvl = (S.oil < 26) ? ((26 - S.oil) / 26) * 0.055 : 0;
+    if(warnLvl > 0) MUS.warn(warnLvl);
+    else MUS.warnOff();
+  }
 
   /* goal */
   if(!S.finished && hit(P,cur.goal)){
@@ -1409,6 +1559,10 @@ function win(){
   if(allGems) stars++;
   if(allGems && quick) stars++;
   const prev=save.levels[S.level];
+  /* captured BEFORE the write below overwrites the record — the
+     result card compares this run against the player's own history */
+  const prevBest   = (prev && prev.time) ? prev.time : null;
+  const isNewBest  = (prevBest === null) || (ratio < prevBest);
   if(!prev || stars>prev.stars || ratio<(prev.time||999)){
     save.levels[S.level]={stars:Math.max(stars, prev?prev.stars:0), time:Math.min(ratio, prev&&prev.time?prev.time:999)};
     persist();
@@ -1428,7 +1582,8 @@ function win(){
      assignment lines that used to sit above this block wrote into
      `null` and threw a TypeError before the result screen could ever
      be reached. The pass mark is set on the object as it is created. */
-  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio};
+  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio,
+            prevBest:prevBest, isNewBest:isNewBest};
   setTimeout(()=>{ showResult(); }, 620);
 }
 
@@ -1947,6 +2102,55 @@ function drawMidLayer(W,par){
 }
 
 /* =========================================================
+   FOREGROUND BAND — the closest parallax layer
+   ---------------------------------------------------------
+   Three bands sat behind the player and none in front, so the
+   frame had depth going away from the camera and none coming
+   toward it. This band travels at 1.45x the camera, faster than
+   the world, which is what sells it as being nearer than the
+   platform the player is standing on.
+
+   It is deliberately confined to the BOTTOM of the frame, below
+   the ground line, for one reason: a foreground layer that can
+   cross the play area hides platforms, and a platform you cannot
+   see is not atmosphere, it is a death. Rubble at the foot of the
+   frame adds depth and can never cost the player a life.
+
+   Seeded from WORLD index, not the screen slot — the same fix
+   already applied to the two layers behind.
+   ========================================================= */
+function drawForeLayer(W){
+  const par = 1.45;
+  const ox  = -S.cam * par;
+  const STEP = 300;
+  const cols = Math.ceil(VIEW_W / STEP) + 2;
+  const shift = Math.floor(ox / STEP);
+
+  ctx.save();
+  ctx.globalAlpha = 0.62;
+  ctx.fillStyle = (PAL(W) && PAL(W).shadow) ? PAL(W).shadow : '#05030a';
+
+  for(let i = -1; i < cols; i++){
+    const bx = i*STEP + ((ox % STEP) + STEP) % STEP - 30;
+    const worldIndex = i - shift;
+    const seed = ((worldIndex*61) % 53 + 53) % 53;
+    const h = 46 + seed;
+    const baseY = VIEW_H + 30;
+
+    /* a cluster of low lumps — rubble, never a wall */
+    ctx.beginPath();
+    ctx.moveTo(bx - 20, baseY);
+    ctx.quadraticCurveTo(bx + 10,  baseY - h * 0.90, bx + 70,  baseY - h * 0.55);
+    ctx.quadraticCurveTo(bx + 120, baseY - h,        bx + 180, baseY - h * 0.42);
+    ctx.quadraticCurveTo(bx + 240, baseY - h * 0.90, bx + 300, baseY);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/* =========================================================
    PALETTE ACCESS — one ramp, one fallback, no exceptions.
    ========================================================= */
 const PAL_FALLBACK = {
@@ -2161,7 +2365,7 @@ function drawPlatBody(p, W, heat){
   const rimG = ctx.createLinearGradient(p.x, p.y, p.x + Math.min(p.w, 110), p.y + rimBand);
   rimG.addColorStop(0, pal.rim);
   rimG.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.globalAlpha = 0.26 + h * 0.22;
+  ctx.globalAlpha = 0.34 + h * 0.22;
   ctx.fillStyle = rimG;
   ctx.fillRect(p.x, p.y, p.w, rimBand);
   /* a soft contact shadow along the underside, inside the silhouette */
@@ -3367,6 +3571,9 @@ function buildPlayerSprites(){
    ========================================================= */
 const trailPts = [];
 let lampLagX = 0, lampLagY = 0;
+/* footsteps are timed by DISTANCE, not by the clock: a slow walk
+   must not tap at the same rate as a sprint */
+let stepAcc = 0;
 
 function pushTrail(x, y){
   trailPts.push({ x:x, y:y });
@@ -3993,16 +4200,25 @@ function drawBloom(strength){
    canvas output: the shadows lean blue, the highlights lean
    amber, and the two halves of the screen belong together.
    ========================================================= */
+/* the split-tone ramp only depends on the viewport height, so it is
+   built once and reused — the same rule the vignette and the top/bottom
+   shade already follow. It was the last per-frame gradient in the
+   post stack. */
+let gradeGrad = null, gradeGradH = -1;
+
 function drawGrade(){
   if(PERF.off) return;
-  const g = ctx.createLinearGradient(0, 0, 0, VH);
-  g.addColorStop(0,    'rgba(34,48,92,0.065)');
-  g.addColorStop(0.45, 'rgba(0,0,0,0)');
-  g.addColorStop(0.72, 'rgba(0,0,0,0)');
-  g.addColorStop(1,    'rgba(104,48,10,0.075)');
+  if(gradeGradH !== VH || !gradeGrad){
+    const g = ctx.createLinearGradient(0, 0, 0, VH);
+    g.addColorStop(0,    'rgba(34,48,92,0.065)');
+    g.addColorStop(0.45, 'rgba(0,0,0,0)');
+    g.addColorStop(0.72, 'rgba(0,0,0,0)');
+    g.addColorStop(1,    'rgba(104,48,10,0.075)');
+    gradeGrad = g; gradeGradH = VH;
+  }
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = g;
+  ctx.fillStyle = gradeGrad;
   ctx.fillRect(0, 0, VW, VH);
   ctx.restore();
 }
@@ -4098,6 +4314,36 @@ function drawShade(){
   ctx.restore();
 }
 
+/* =========================================================
+   OIL WARNING — a red pulse at the edges of the frame
+   ---------------------------------------------------------
+   Below 20 units of oil the lantern starts to tremble and the
+   ambient darkness closes in, but both of those are things the
+   player has to LOOK for. This is a peripheral signal: it lives
+   at the edge of the screen, it pulses at close to a resting
+   heart rate, and it appears only when the situation is genuinely
+   critical.
+
+   Drawn only under 20 oil, so the gradient it allocates is never
+   created on a normal frame.
+   ========================================================= */
+function drawOilWarning(){
+  if(S.oil > 20) return;
+  const k = (20 - S.oil) / 20;                       /* 0 .. 1 */
+  const pulse = 0.5 + 0.5 * Math.sin(S.t * 6.2);
+  const a = 0.08 + k * 0.22 * (0.55 + 0.45 * pulse);
+
+  const g = ctx.createRadialGradient(VW/2, VH/2, VH * 0.42, VW/2, VH/2, VH * 1.02);
+  g.addColorStop(0, 'rgba(255,60,50,0)');
+  g.addColorStop(1, 'rgba(255,60,50,' + a.toFixed(3) + ')');
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VW, VH);
+  ctx.restore();
+}
+
 /* apply the world->screen transform for gameplay drawing */
 function worldTransform(){
   ctx.setTransform(DPR*SCALE,0,0,DPR*SCALE,0,0);
@@ -4120,21 +4366,67 @@ const menuMotes=[];
   }
 })();
 
+/* =========================================================
+   MENU AMBIENCE — CACHED
+   ---------------------------------------------------------
+   The menu is a nearly static screen, yet it rebuilt one linear
+   gradient and two radial gradients on EVERY frame — the same
+   mistake that had already been removed from the gameplay path.
+   The two warm lights drift, but their SHAPE never changes: a
+   radial gradient that only moves is a sprite that only moves.
+   Each one is rasterised once into a small canvas and blitted at
+   its animated position. The sky ramp is keyed on the viewport.
+   ========================================================= */
+const menuSky = document.createElement('canvas');
+const menuSkyX = menuSky.getContext('2d');
+let menuSkyKey = '';
+
+const menuGlow = document.createElement('canvas');
+const menuGlowX = menuGlow.getContext('2d');
+const MENU_GLOW_R = 128;
+let menuGlowReady = false;
+
+function buildMenuGlow(){
+  menuGlow.width = MENU_GLOW_R*2;
+  menuGlow.height = MENU_GLOW_R*2;
+  menuGlowX.clearRect(0,0,MENU_GLOW_R*2,MENU_GLOW_R*2);
+  const R = MENU_GLOW_R;
+  const g = menuGlowX.createRadialGradient(R,R,0,R,R,R);
+  g.addColorStop(0,   'rgba(255,190,110,.20)');
+  g.addColorStop(0.55,'rgba(255,140,80,.05)');
+  g.addColorStop(1,   'rgba(0,0,0,0)');
+  menuGlowX.fillStyle = g;
+  menuGlowX.beginPath(); menuGlowX.arc(R,R,R,0,6.2832); menuGlowX.fill();
+  menuGlowReady = true;
+}
+
 function renderMenu(dt){
-  const g=ctx.createLinearGradient(0,0,VW*.35,VH);
-  g.addColorStop(0,'#1b1026'); g.addColorStop(.5,'#0d0814'); g.addColorStop(1,'#05030a');
-  ctx.fillStyle=g; ctx.fillRect(0,0,VW,VH);
+  /* --- the sky ramp: 2px strip, rebuilt only on a real resize --- */
+  const key = VW + 'x' + VH;
+  if(key !== menuSkyKey){
+    menuSky.width = 2;
+    menuSky.height = Math.max(1, Math.round(VH));
+    const g = menuSkyX.createLinearGradient(0,0,VW*.35,VH);
+    g.addColorStop(0,'#1b1026'); g.addColorStop(.5,'#0d0814'); g.addColorStop(1,'#05030a');
+    menuSkyX.fillStyle = g;
+    menuSkyX.fillRect(0,0,2,menuSky.height);
+    menuSkyKey = key;
+  }
+  ctx.drawImage(menuSky, 0,0, 2, menuSky.height, 0,0, VW, VH);
 
   const t=S.t;
-  /* two drifting warm lights for depth */
+  /* two drifting warm lights for depth — blitted from one sprite */
+  if(!menuGlowReady) buildMenuGlow();
   for(let k=0;k<2;k++){
     const cx=VW*(k?0.74:0.26)+Math.sin(t*.19+k*2.1)*VW*.09;
     const cy=VH*(k?0.36:0.62)+Math.cos(t*.15+k)*VH*.1;
-    const bg=ctx.createRadialGradient(cx,cy,0,cx,cy,VH*(k?0.7:0.95));
-    bg.addColorStop(0,k?'rgba(255,150,90,.16)':'rgba(255,190,110,.20)');
-    bg.addColorStop(.55,'rgba(255,140,80,.05)');
-    bg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=bg; ctx.fillRect(0,0,VW,VH);
+    const R = VH*(k?0.7:0.95);
+    ctx.save();
+    /* the two lights have different strengths in the original:
+       the near one is warmer and stronger than the far one */
+    ctx.globalAlpha = k ? 0.80 : 1.0;
+    ctx.drawImage(menuGlow, cx-R, cy-R, R*2, R*2);
+    ctx.restore();
   }
 
   /* distant arches silhouette */
@@ -4254,6 +4546,11 @@ function render(dt){
     drawParticles();
 
     ctx.restore();
+
+    /* the closest band: in front of the player, faster than the
+       world, and confined to the foot of the frame */
+    drawForeLayer(W);
+
     ctx.restore();
 
     /* 3) darkness + vignette are screen-space overlays */
@@ -4261,6 +4558,7 @@ function render(dt){
     drawDarkness(W);
     drawShade();
     drawVignette();
+    drawOilWarning();
 
     /* =========================================================
        4) THE POST PASS — glow, grade, grain.
@@ -4682,7 +4980,125 @@ function showHud(){
   if(MUS.on) MUS.start();
 }
 
+/* =========================================================
+   WORLD TINT
+   ---------------------------------------------------------
+   The HUD, the pause sheet, the result card and the focus ring
+   all read `--gold`. That variable used to be one fixed amber in
+   every world, which is the visual equivalent of the same
+   furniture appearing in five different houses.
+
+   It nowreads the current world's accent. One CSS custom-property write at
+   level load, and the interface belongs to the place the player
+   is standing in.
+   ========================================================= */
+const TINT_BASE = { gold:'#ffc978', gold2:'#e8933f' };
+
+function applyWorldTint(W){
+  const r = document.documentElement.style;
+  if(!W){
+    r.setProperty('--gold',  TINT_BASE.gold);
+    r.setProperty('--gold2', TINT_BASE.gold2);
+    return;
+  }
+  r.setProperty('--gold',  W.accent);
+  r.setProperty('--gold2', W.platTop);
+}
+
+/* =========================================================
+   TOAST
+   ---------------------------------------------------------
+   A checkpoint already saved the respawn point silently. Saying
+   so costs one line and turns an invisible system into a felt
+   one. Cosmetic only — it never takes focus and never eats a tap.
+   ========================================================= */
+const TOAST = { el:null, span:null, timer:0 };
+
+function toastInit(){
+  TOAST.el = qs('#toast');
+  if(TOAST.el) TOAST.span = TOAST.el.querySelector('span');
+}
+
+function toast(msg, kind){
+  if(!TOAST.el || !msg) return;
+  if(TOAST.span) TOAST.span.textContent = msg;
+  TOAST.el.classList.remove('warn');
+  if(kind) TOAST.el.classList.add(kind);
+  TOAST.el.classList.remove('show');
+  void TOAST.el.offsetWidth;          /* paint the hidden state first */
+  TOAST.el.classList.add('show');
+  clearTimeout(TOAST.timer);
+  TOAST.timer = setTimeout(function(){
+    TOAST.el.classList.remove('show');
+  }, 1900);
+}
+
+/* =========================================================
+   LEVEL CURTAIN
+   ---------------------------------------------------------
+   Every transition between levels used to be a hard cut: one
+   frame the result sheet, the next a new world with the HUD
+   already counting. Nothing in the interface moved, and an
+   interface that never moves reads as assembled rather than
+   directed.
+
+   The screen closes onto the game's own background, the world
+   and level name are revealed on it with the same gold ramp as
+   the title screen, and it opens again on a level that is
+   already running but PAUSED — so the beat costs the player no
+   clock and no oil.
+
+   A restart of the level the player is already standing in skips
+   the curtain entirely: they asked to be back in the level, not
+   to read a title card they have already read.
+   ========================================================= */
+const CUR = { el:null, world:null, title:null };
+
+function curtainInit(){
+  CUR.el    = qs('#curtain');
+  CUR.world = qs('#curtain-world');
+  CUR.title = qs('#curtain-title');
+}
+
+function playCurtain(i, startFn){
+  const L = LEVELS[i];
+  if(!CUR.el || !L){ startFn(); return; }
+
+  const W = WORLDS.filter(function(w){ return w.id === L.w; })[0] || WORLDS[0];
+
+  if(CUR.world) CUR.world.textContent = (W.name[LANG] || W.name.ar).toUpperCase();
+  if(CUR.title) CUR.title.textContent = (L.name[LANG] || L.name.ar);
+
+  CUR.el.hidden = false;
+  CUR.el.classList.remove('on');
+  void CUR.el.offsetWidth;            /* paint the closed state first */
+  CUR.el.classList.add('on');
+
+  /* 1 · the screen is closing — build the level behind it */
+  setTimeout(function(){
+    startFn();
+    S.paused = true;                  /* freeze the clock and the oil */
+
+    /* 2 · hold, so the name can be read */
+    setTimeout(function(){
+      CUR.el.classList.remove('on');
+
+      /* 3 · the screen is open again — unfreeze */
+      setTimeout(function(){
+        CUR.el.hidden = true;
+        S.paused = false;
+      }, 400);
+    }, 620);
+  }, 320);
+}
+
+/* the real entry point: no curtain for a same-level restart */
 function startLevel(i){
+  if(S.screen === 'play' && i === S.level){ beginLevel(i); return; }
+  playCurtain(i, function(){ beginLevel(i); });
+}
+
+function beginLevel(i){
   loadLevel(i);
   /* =========================================================
      ENTERING A LEVEL IS PROGRESS
@@ -4694,7 +5110,7 @@ function startLevel(i){
      ========================================================= */
   markUnlocked(i);
   /* a hazard card from the previous level must not follow the
-      player into this one */
+       player into this one */
   hideHazardCard();
   TUT.hazardQueue = [];
   TUT.hazardDelay = 0;
@@ -4702,6 +5118,7 @@ function startLevel(i){
   qa('.screen').forEach(s=>s.classList.remove('active'));
   qs('#ov-pause').hidden=true;
   qs('#ov-result').hidden=true;
+  qs('#ov-gameover').hidden=true;
   showHud();
   updateHUD();
   AU.init(); AU.resume();
@@ -4755,6 +5172,22 @@ function showResult(){
   qs('#res-gems').textContent = r.gems+'/'+r.total;
   qs('#res-time').textContent = fmt(r.time);
 
+  /* ---- this run against the best previous run ---- */
+  const bestEl = qs('#res-best');
+  if(bestEl){
+    if(r.prevBest && r.isNewBest){
+      bestEl.textContent = t('result.newBest');
+      bestEl.classList.add('best');
+      bestEl.hidden = false;
+    } else if(r.prevBest){
+      bestEl.textContent = t('result.prevBest') + ' · ' + fmt(r.prevBest);
+      bestEl.classList.remove('best');
+      bestEl.hidden = false;
+    } else {
+      bestEl.hidden = true;
+    }
+  }
+
   /* =========================================================
      THE RESULT SCREEN ALWAYS OFFERS THE NEXT LEVEL
      ---------------------------------------------------------
@@ -4767,7 +5200,15 @@ function showResult(){
 
   const sub = qs('#res-sub');
   if(sub){
-    sub.textContent = isFinal ? '' : t('result.passed');
+    if(isFinal){
+      sub.textContent = '';
+    } else {
+      /* name the next level — "the next level is open" is true but
+         says nothing a player wants to know */
+      const nx = LEVELS[S.level+1];
+      const nm = nx ? (nx.name[LANG] || nx.name.ar) : '';
+      sub.textContent = nm ? (t('result.passed') + ' — ' + nm) : t('result.passed');
+    }
   }
 
   /* =========================================================
@@ -4949,10 +5390,12 @@ function renderLevels(){
        } else if(openCount === 0){
          console.error('[qandel] no level is unlocked. save.unlocked =',
                        JSON.stringify(save.unlocked), 'maxUnlocked =', save.maxUnlocked);
-       } else {
-         console.log('[qandel] levels:', LEVELS.length, '· open:', openCount,
-                     '· tiles:', tiles, '· unlocked map:', JSON.stringify(save.unlocked));
-       }
+                }
+         /* the success case is silent on purpose: this runs on every
+            render of the levels screen, and a console line per render
+            is noise, not diagnostics. Only the two failure modes —
+            an empty level list and an empty unlock map — are worth a
+            message, and both still report. */
      }catch(e){ console.warn('[qandel] self-check failed:', e); }
   })();
 }
@@ -5057,13 +5500,34 @@ window.addEventListener('keyup', function(e){
   else if(k===' '||k==='arrowup'||k==='w') keys.jump=false;
 });
 
+/* =========================================================
+   PAUSE STATS
+   ---------------------------------------------------------
+   Opening the pause menu used to tell the player nothing except
+   that they had stopped. These three numbers answer the question
+   they actually opened it to ask: how far in, how much collected,
+   how much life left.
+   ========================================================= */
+function fillPauseStats(){
+  const row = qs('#pause-stats');
+  if(!row) return;
+  if(!cur){ row.hidden = true; return; }
+  row.hidden = false;
+  const g  = qs('#ps-gems');
+  const tm = qs('#ps-time');
+  const hp = qs('#ps-hearts');
+  if(g)  g.textContent  = S.gems + '/' + S.totalGems;
+  if(tm) tm.textContent = fmt(S.time);
+  if(hp) hp.textContent = S.hearts + '/' + MAX_HEARTS;
+}
+
 function togglePause(){
   if(S.screen!=='play') return;
   S.paused=!S.paused;
   qs('#ov-pause').hidden=!S.paused;
   /* the tutorial card steps aside while the pause menu is open */
   if(TUT.root) TUT.root.classList.toggle('muted', S.paused);
-  if(S.paused){ MUS.stop(); }
+  if(S.paused){ fillPauseStats(); MUS.stop(); }
   else if(MUS.on){ MUS.start(); }
 }
 
@@ -5256,7 +5720,13 @@ qs('#btn-go-retry').addEventListener('click', function(){ AU.click(); retryLevel
 qs('#btn-go-menu').addEventListener('click', function(){ AU.click(); hideGameOver(); S.paused=false; goMenu(); });
 qs('#btn-home').addEventListener('click', function(){ AU.click(); qs('#ov-result').hidden=true; goMenu(); });
 
-function goMenu(){ show('scr-menu'); renderLevels(); MUS.stop(); }
+function goMenu(){
+  show('scr-menu');
+  renderLevels();
+  MUS.stop();
+  /* the menu is neutral ground — it keeps the game's own gold */
+  try{ applyWorldTint(null); }catch(e){}
+}
 
 /* `onLangApplied` is invoked from `applyI18n()` during boot, which
    means it runs BEFORE most of this file has been evaluated. Every
@@ -5323,6 +5793,8 @@ applyI18n();
 renderLevels();
 syncSettings();
 TUT.init();
+curtainInit();
+toastInit();
 show('scr-menu');
 requestAnimationFrame(frame);
 

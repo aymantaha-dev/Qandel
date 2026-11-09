@@ -234,6 +234,20 @@
   <div class="overlay" id="ov-pause" hidden>
     <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pause-title">
       <h2 id="pause-title" data-i18n="pause.title">توقف مؤقت</h2>
+
+      <!-- =====================================================
+           PAUSE STATS
+           Where exactly is the player standing? Opening the pause
+           menu used to tell them nothing except that they had
+           stopped. Four numbers, read once, answer the question
+           they actually asked.
+           ===================================================== -->
+      <div class="pause-stats" id="pause-stats" hidden>
+        <span><svg class="ic" aria-hidden="true"><use href="#i-gem"/></svg><b id="ps-gems">0/0</b></span>
+        <span><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg><b id="ps-time">0:00</b></span>
+        <span><svg class="ic" aria-hidden="true"><use href="#i-heart"/></svg><b id="ps-hearts">5/5</b></span>
+      </div>
+
       <div class="actions">
         <button class="btn primary" id="btn-resume"><svg class="ic"><use href="#i-play"/></svg><span data-i18n="pause.resume">متابعة</span></button>
         <button class="btn ghost" id="btn-restart"><svg class="ic"><use href="#i-retry"/></svg><span data-i18n="pause.restart">إعادة</span></button>
@@ -283,6 +297,9 @@
         <div><svg class="ic gold"><use href="#i-gem"/></svg><span data-i18n="result.gems">الجواهر</span><b id="res-gems">0/0</b></div>
         <div><svg class="ic"><use href="#i-clock"/></svg><span data-i18n="result.time">الوقت</span><b id="res-time">0:00</b></div>
       </div>
+
+      <!-- this run measured against the player's own history -->
+      <p class="res-best" id="res-best" hidden></p>
       <div class="actions">
         <button class="btn primary" id="btn-next"><svg class="ic"><use href="#i-next"/></svg><span data-i18n="result.next">المرحلة التالية</span></button>
         <button class="btn ghost" id="btn-retry"><svg class="ic"><use href="#i-retry"/></svg><span data-i18n="result.retry">إعادة</span></button>
@@ -346,6 +363,31 @@
       <button class="tbtn jump" id="t-jump" aria-label="قفز" data-i18n-aria="touch.jump">
         <svg class="ic"><use href="#i-arrow-up"/></svg>
       </button>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       TOAST
+       A one-line acknowledgement. It sits above the HUD, never
+       takes focus, never blocks a touch, and removes itself.
+       ========================================================= -->
+  <div id="toast" role="status" aria-live="polite">
+    <svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>
+    <span></span>
+  </div>
+
+  <!-- =========================================================
+       LEVEL CURTAIN
+       The screen closes onto the game's own background, the world
+       and level name are revealed on it, and it opens again on a
+       level that is already running but paused — so the beat costs
+       the player no time and no oil.
+       ========================================================= -->
+  <div id="curtain" aria-hidden="true" hidden>
+    <div class="curtain-inner">
+      <span class="curtain-world" id="curtain-world"></span>
+      <h2 class="curtain-title" id="curtain-title"></h2>
+      <div class="curtain-rule" aria-hidden="true"><i></i></div>
     </div>
   </div>
 </div>

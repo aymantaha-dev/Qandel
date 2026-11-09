@@ -30,6 +30,7 @@ const I18N = {
     "settings.high":"عالية","settings.low":"خفيفة","settings.reset":"تصفير التقدّم",
     "settings.resetBtn":"مسح","settings.tutorial":"بطاقة التعليم","settings.tutorialBtn":"إظهار",
     "settings.done":"تم",
+    "toast.saved":"نقطة حفظ",
     "tut.prev":"السابق","tut.next":"التالي",
     "touch.left":"يسار","touch.right":"يمين","touch.jump":"قفز",
     "pause.title":"توقف مؤقت","pause.resume":"متابعة","pause.restart":"إعادة","pause.menu":"القائمة",
@@ -38,6 +39,8 @@ const I18N = {
     "result.passed":"المرحلة التالية مفتوحة.",
     "result.replayHint":"لم تكتمل النجوم بعد — أعد المرحلة لتجمعها كلها.",
     "result.final":"أنهيت الرحلة!",
+    "result.newBest":"رقم قياسي جديد",
+    "result.prevBest":"أفضل سابقاً",
     "credits.title":"عن اللعبة",
     "credits.body":"قنديل لعبة ألغاز ومنصّات. تلعب بدور روح قنديل صغيرة تعيد النور إلى بيوت مظلمة. اجمع الجواهر، واحفظ زيت قنديلك، وتجنّب الفخاخ حتى تبلغ الباب المضيء.\n\nخمسة عوالم، وخمس وعشرون مرحلة، وثلاث نجوم لكل مرحلة.\n\n── الفخاخ ──\n\n• الأشواك — صفوف حمراء على الأرض، لمسة واحدة تقتلك.\n• النار — ألسنة برتقالية تُشعِل وتنطفئ بإيقاع منتظم؛ اعبر وقت الانطفاء.\n• الحمم — بحيرات برتقالية سائلة لا تنطفئ؛ اعبرها على الحجارة.\n• المنشار — قرص معدني دوّار يتحرك على مسار ثابت أفقيًا أو عموديًا.\n• المسامير — صفوف قصيرة كثيفة، أرضية أو معلّقة من السقف.\n• الحجر الساقط — حجر معلّق في السقف يهوي عند مرورك تحته، ثم يرتفع من جديد؛ الخط المتقطع على الأرض يخبرك بمكان سقوطه.\n• المنصات المتفتتة — تتفتت بعد مدة متفاوتة؛ الشقوق تلمع قبل الانهيار.\n• المنصات المتحركة — تعبر فوق الفراغات؛ تحركها منتظم وقابل للحفظ.\n\nكل فخ يظهر من المرحلة الأولى بشكل بسيط وسهل، ثم تزداد سرعته وعدده وحدّته مع تقدّمك — حتى المرحلة الخامسة والعشرين حيث كل شيء في أقصى حالاته. القواعد لا تتغير أبدًا: كل فخ مرئي قبل أن يقتلك.\n\nصناعة: Trex · Kivode",
 
@@ -90,6 +93,7 @@ const I18N = {
     "settings.high":"High","settings.low":"Low","settings.reset":"Reset progress",
     "settings.resetBtn":"Clear","settings.tutorial":"Guide cards","settings.tutorialBtn":"Show",
     "settings.done":"Done",
+    "toast.saved":"Checkpoint saved",
     "tut.prev":"Previous","tut.next":"Next",
     "touch.left":"Left","touch.right":"Right","touch.jump":"Jump",
     "pause.title":"Paused","pause.resume":"Resume","pause.restart":"Restart","pause.menu":"Menu",
@@ -98,6 +102,8 @@ const I18N = {
     "result.passed":"The next level is open.",
     "result.replayHint":"Not every star yet — replay the level to collect them all.",
     "result.final":"Journey complete!",
+    "result.newBest":"New best time",
+    "result.prevBest":"Previous best",
     "credits.title":"About",
     "credits.body":"Qandel is a light-driven puzzle platformer. You are a small lantern spirit bringing light back to dark, abandoned houses. Collect gems, keep your lamp oiled, avoid the hazards, and reach the glowing door.\n\nFive worlds, twenty-five levels, three stars each.\n\n── The hazards ──\n\n• Spikes — red rows on the ground; one touch kills.\n• Fire — orange flames that light and die on a steady rhythm; cross while they are out.\n• Lava — molten orange pools that never go out; cross on the stones.\n• Saws — a spinning metal disc on a fixed path, sliding or bobbing.\n• Nails — short dense rows, on the floor or hanging from the ceiling.\n• Falling stones — a stone hangs from the ceiling and drops when you pass under it, then climbs back; the dashed rail on the floor shows where it will land.\n• Fragile platforms — crumble after a variable delay; the cracks glow before they give way.\n• Moving platforms — carry you over voids; their motion is regular and learnable.\n\nEvery hazard appears from the very first level in its simplest form, then gains speed, count and severity as you progress — until level twenty-five, where everything is at its most extreme. The rules never change: every hazard is visible before it can kill you.\n\nMade by Trex · Kivode",
 
