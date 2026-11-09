@@ -1,4 +1,5 @@
 # Qandil
+<img width="1584" height="672" alt="1000133839" src="https://github.com/user-attachments/assets/2728b369-85cd-4235-ad2e-59e59d4d4400" />
 
 A lantern-lit platformer built with vanilla HTML, CSS and JavaScript. No
 frameworks, no build step, no external art or audio assets. You play a small
