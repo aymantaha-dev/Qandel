@@ -1,4 +1,5 @@
 # Qandil — World, Story and Progression
+<img width="2816" height="1584" alt="1000133835" src="https://github.com/user-attachments/assets/0d578e76-7dc3-4aa3-93f0-a976b9f14ac0" />
 
 A companion document to `README.md`. This one covers the narrative, the five
 worlds, the twenty-five levels, the systems that shape a run, and how long the
