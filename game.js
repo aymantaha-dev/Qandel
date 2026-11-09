@@ -127,14 +127,31 @@ function starsOf(i){ const r=save.levels[i]; return r? (r.stars||0) : 0; }
    screen can tell "opened" from "never reached" without walking
    the whole map.
    ========================================================= */
+/* =========================================================
+   UNLOCKING IS EARNED, NOT ASSUMED
+   ---------------------------------------------------------
+   Entering a level records that level as open — and nothing else.
+   The NEXT level is opened by `win()`, when the door is actually
+   reached. That is the whole rule: a level you have not finished
+   cannot hand out the one after it.
+
+   `maxUnlocked` is still the highest index ever ENTERED, so the
+   levels screen can tell "reached" from "never seen" without
+   walking the map.
+   ========================================================= */
+/* =========================================================
+   THE PASS MARK — what a level must earn to open the next one.
+   ---------------------------------------------------------
+   One star is a survival. Two stars means every gem in the level
+   was collected. Three means it was also done inside par time.
+   Only two and above are worth a door.
+   ========================================================= */
+const PASS_STARS = 2;
+
 function markUnlocked(i){
   if(i < 0 || i >= LEVELS.length) return;
   save.unlocked = save.unlocked || {};
   save.unlocked[i] = 1;
-  /* the next level opens the moment this one is entered — you do
-     not have to finish it to keep the door you already walked
-     through */
-  if(i + 1 < LEVELS.length) save.unlocked[i+1] = 1;
   if(save.maxUnlocked === undefined || i > save.maxUnlocked){
     save.maxUnlocked = i;
   }
@@ -145,12 +162,12 @@ function unlocked(i){
   if(i < 0 || i >= LEVELS.length) return false;
   if(i === 0) return true;
 
-  /* ---- 1 · the explicit record wins, always ---- */
+  /* ---- 1 · the explicit record wins ---- */
   if(save.unlocked && save.unlocked[i]) return true;
 
-  /* ---- 2 · legacy saves: fall back to the old chain rule, and
-              back-fill the record so it never regresses again ---- */
-  if(starsOf(i-1) > 0){
+  /* ---- 2 · legacy saves: the previous level must have been cleared
+              at the pass mark, exactly like a live run ---- */
+  if(starsOf(i-1) >= PASS_STARS){
     save.unlocked = save.unlocked || {};
     save.unlocked[i] = 1;
     if(save.maxUnlocked === undefined || i > save.maxUnlocked) save.maxUnlocked = i;
@@ -170,15 +187,26 @@ function unlocked(i){
    the map is filled from the star table, then extended by one
    past the highest completed level. Runs once at boot.
    ========================================================= */
+/* =========================================================
+   MIGRATION — rebuild the unlock record from earned stars only.
+   ---------------------------------------------------------
+   A save from an older build has stars but no `unlocked` map. Every
+   level with a star was finished, so it is open; the level after the
+   highest finished one is open too, because finishing that one is
+   what earned it. Nothing else is granted — a level that was merely
+   entered is not evidence that it was cleared.
+   ========================================================= */
 function migrateUnlocks(){
   save.unlocked = save.unlocked || {};
   let highest = -1;
   for(let i=0;i<LEVELS.length;i++){
-    if(starsOf(i) > 0){
-      save.unlocked[i] = 1;
-      if(i + 1 < LEVELS.length) save.unlocked[i+1] = 1;
-      if(i > highest) highest = i;
-    }
+    const st = starsOf(i);
+    if(st > 0) save.unlocked[i] = 1;          /* played → open to replay */
+    if(st >= PASS_STARS && i > highest) highest = i;
+  }
+  /* only a level cleared at the pass mark hands out the one after it */
+  if(highest > -1 && highest + 1 < LEVELS.length){
+    save.unlocked[highest + 1] = 1;
   }
   if(highest > -1 && (save.maxUnlocked === undefined || highest > save.maxUnlocked)){
     save.maxUnlocked = highest;
@@ -1323,16 +1351,24 @@ function win(){
     persist();
   }
   /* =========================================================
-     WINNING OPENS THE NEXT LEVEL — explicitly.
+     A LEVEL IS EARNED, NOT JUST FINISHED
      ---------------------------------------------------------
-     `highestOpen()` already derives this from the star that was
-     just written, but recording it directly means the unlock does
-     not depend on the star count surviving a later replay. One
-     level won, one level opened, permanently.
-     ========================================================= */
-  if(S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
+     Reaching the door is not enough. The next level opens only on
+     a run worth keeping: two stars or three. One star means the
+     level was survived, not mastered — the door stays shut and the
+     player replays it.
 
-  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio};
+     Stars are 1 for arriving, +1 for every gem, +1 for beating par
+     with every gem. So two stars means the gems were collected, and
+     three means the gems were collected inside the time limit.
+     ========================================================= */
+  const passMark = stars >= 2;
+  if(passMark && S.level + 1 < LEVELS.length) markUnlocked(S.level + 1);
+  S.result.passMark = passMark;
+  S.result.passStars = 2;
+
+  S.result={stars:stars, gems:S.gems, total:S.totalGems, time:ratio,
+            passMark:false, passStars:2};
   setTimeout(()=>{ showResult(); }, 620);
 }
 
@@ -4632,9 +4668,42 @@ function showResult(){
   for(let i=0;i<3;i++) st[i].classList.remove('on');
   qs('#res-gems').textContent = r.gems+'/'+r.total;
   qs('#res-time').textContent = fmt(r.time);
+
+  /* =========================================================
+     THE RESULT SCREEN MUST SAY WHY THE DOOR IS SHUT
+     ---------------------------------------------------------
+     A player who finishes a level and finds the next one still
+     locked needs the reason on screen, not in a wiki. The subtitle
+     states the pass mark and the current count; the "next" button
+     becomes "retry" when the mark was not met, so the only obvious
+     action is the one that helps.
+     ========================================================= */
+  const isFinal = (S.level === LEVELS.length-1);
+  const passed  = (r.stars >= PASS_STARS);
+
+  const sub = qs('#res-sub');
+  if(sub){
+    if(isFinal){
+      sub.textContent = '';
+    } else if(passed){
+      sub.textContent = t('result.passed');
+    } else {
+      sub.textContent = t('result.needStars')
+        .replace('{n}', String(PASS_STARS))
+        .replace('{got}', String(r.stars));
+    }
+  }
+
   const nextBtn=qs('#btn-next');
   const nextLabel=nextBtn.querySelector('span');
-  if(nextLabel) nextLabel.textContent = (S.level===LEVELS.length-1) ? t('result.menu') : t('result.next');
+  if(nextLabel){
+    nextLabel.textContent = isFinal
+      ? t('result.menu')
+      : (passed ? t('result.next') : t('result.retry'));
+  }
+  /* the same button, two jobs: advance, or go back and earn it */
+  nextBtn.dataset.mode = (isFinal || passed) ? 'next' : 'retry';
+
   qs('#ov-result').hidden=false;
   S.playing=false;
   hud.root.hidden=true;
@@ -4718,7 +4787,8 @@ function renderLevels(){
          keyboard can reach it and a screen reader announces it.
          Only the locked ones have their click handler withheld.
          ========================================================= */
-      const isNext = open && stars === 0;
+      /* the "next" tile is the first OPEN level that has not been cleared */
+  const isNext = open && stars === 0;
       b.className = 'lv' + (open ? (isNext ? ' next' : ' done') : ' locked');
       b.type = 'button';
       b.setAttribute('aria-label', (idx+1) + (open ? '' : ' — ' + t('levels.locked')));
@@ -5089,7 +5159,12 @@ qs('#btn-quit').addEventListener('click', function(){ AU.click(); qs('#ov-pause'
 
 qs('#btn-next').addEventListener('click', function(){
   AU.click();
+  const btn = qs('#btn-next');
   qs('#ov-result').hidden=true;
+
+  /* the button serves two jobs — see showResult() */
+  if(btn.dataset.mode === 'retry'){ startLevel(S.level); return; }
+
   if(S.level>=LEVELS.length-1){ goMenu(); renderLevels(); }
   else startLevel(S.level+1);
 });

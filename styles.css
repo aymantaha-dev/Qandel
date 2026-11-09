@@ -537,6 +537,24 @@ html[dir="rtl"] .btn.primary::after{
 }
 .overlay p:last-of-type{margin-bottom:0}
 
+/* =========================================================
+   PASS-MARK LINE
+   ---------------------------------------------------------
+   One short sentence under the result title that says whether the
+   next level opened — and, when it did not, exactly what is
+   missing. A locked door with no explanation reads as a bug.
+   ========================================================= */
+.res-sub{
+  margin:0 0 clamp(10px,1.8vh,14px);
+  font-size:clamp(12px,1.7vh,14px);
+  line-height:1.7;
+  color:#e6d8c6;
+  text-align:center;
+  max-width:36ch;
+  margin-inline:auto;
+}
+.res-sub:empty{display:none}
+
 /* results: stars + two compact stat tiles */
 .stars-big{
   display:flex;justify-content:center;
