@@ -24,7 +24,7 @@
    The game has no backend, but the worker stays honest.
    ========================================================= */
 
-const VERSION = 'qandel-v8';
+const VERSION = 'qandel-v7';
 const CACHE   = VERSION;
 
 /* The shell — every file the game needs to boot and be
