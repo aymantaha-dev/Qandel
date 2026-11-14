@@ -575,12 +575,41 @@ html[dir="rtl"] .btn.primary::after{
    without any `!important`.
    ========================================================= */
 .menu-wrap{
-  /* `svh` is the SMALL viewport height — the height with the
-     browser bars showing — which is the only one that is honest
-     about how much room the menu actually has. `vh` is kept as
-     the fallback line above it for older engines. */
-  --u: clamp(1.8px, 0.62vh, 4.2px);
-  --u: clamp(1.8px, 0.62svh, 4.2px);
+  /* =========================================================
+     THE BUDGET — why the old number was wrong
+     ---------------------------------------------------------
+     The stacked column measures ~172u end to end:
+       22u  padding (11u top + 11u bottom)
+      + 56u  hero  (lamp 20u + title 18u + rule + subtitle)
+      +  4.6u the gap between hero and panel
+      + 90u  the glass panel (its own padding, gaps and 5 rows)
+
+     The old coefficient was 0.62svh, so the column resolved to
+     172 × 0.62 = 107% of the viewport height — on EVERY screen,
+     at every size. It never fitted. The overflow was then paid
+     for by a hidden `overflow-y:auto`, which is why the chips
+     row ended up sitting under the bottom edge with no visible
+     way to reach it: the menu was not squeezed, it was cropped.
+
+     0.52 is the honest number: 172 × 0.52 ≈ 89svh, which leaves
+     ~10% of air (the artwork's own breathing room) and — this is
+     the point — the SAME ratio at every size, because every
+     measurement below is still a multiple of `--u`.
+
+     `svh` is the small viewport height (the honest one while the
+     browser bars are showing); `vh` stays above it as the
+     fallback for engines without `svh`.
+
+     THE WIDTH CLAMP
+     ---------------
+     `--u` used to be height-only, so a narrow window could give
+     a panel wider than the frame and a menu-row whose two labels
+     collided. `min(..., 1.15vw)` ties the unit to the narrowest
+     axis as well, so the whole composition shrinks instead of
+     the row squeezing.
+     ========================================================= */
+  --u: clamp(1.5px, 0.52vh, 4.2px);
+  --u: clamp(1.5px, min(0.52svh, 1.15vw), 4.2px);
   gap: calc(var(--u) * 4.6);
   padding-block: calc(var(--u) * 11);
   padding-inline: calc(var(--u) * 8);
@@ -676,6 +705,43 @@ html[lang="en"] .menu-wrap .sub{
   height: calc(var(--u) * 3.3);
 }
 
+/* =========================================================
+   NOTHING IN THE MENU MAY EVER BE SQUEEZED
+   ---------------------------------------------------------
+   The panel is a column of flex items and the button row is a
+   two-column grid, so any shortage of room used to be paid for
+   by the controls themselves: a label lost its line, an icon
+   collapsed to a sliver, two neighbours started to touch and
+   finally overlap. That is the "elements pressing into each
+   other" the player sees.
+
+   Every control below now declares its intrinsic size instead of
+   negotiating it, and every label refuses to wrap. If the menu
+   truly runs out of room the wrap scrolls — the shapes survive,
+   the layout never overlaps.
+   ========================================================= */
+.menu-wrap .menu-actions,
+.menu-wrap .menu-actions > *{flex:0 0 auto}
+.menu-wrap .menu-row{grid-auto-rows:auto}
+.menu-wrap .menu-row > .btn{
+  min-width:0;
+  flex:0 0 auto;
+}
+.menu-wrap .btn,
+.menu-wrap .chip,
+.menu-wrap .hstat{
+  flex:0 0 auto;
+  min-width:0;
+}
+.menu-wrap .btn > span,
+.menu-wrap .chip > span,
+.menu-wrap .hstat small{white-space:nowrap}
+.menu-wrap .btn .ic,
+.menu-wrap .chip .ic,
+.menu-wrap .hstat .ic{flex:0 0 auto}
+/* the progress card must not collapse to a hairline either */
+.menu-wrap .hero-stats{flex:0 0 auto;min-height:fit-content}
+
 /* ---- the rotating rays are pure cost on a small screen ---- */
 @media (max-height:560px){
   .lamp-rays{display:none}
@@ -706,9 +772,24 @@ html[lang="en"] .menu-wrap .sub{
    mirroring is needed. `order` is untouched, so the reading order
    stays hero → panel in both directions.
    ========================================================= */
-@media (orientation:landscape) and (min-width:520px) and (max-height:460px){
+/* =========================================================
+   THE BREAKPOINT ITSELF WAS TOO NARROW
+   ---------------------------------------------------------
+   It used to start at `max-height:460px`, so a 1024×600 laptop, a
+   4:3 monitor at 800×600 or a browser window dragged short all
+   stayed on the stacked layout — and the stacked layout simply
+   does not fit a 520px-tall frame. They were the screens that
+   looked worst, and they were the ones the rule skipped.
+
+   Two columns need max(hero, panel) = 90u of height instead of
+   172u, so from 620px down the row is the correct composition.
+   The width axis gets its own clamp (0.55vw) because the pair is
+   ~166u wide end to end and the frame must hold it without
+   touching the edges.
+   ========================================================= */
+@media (orientation:landscape) and (min-width:520px) and (max-height:620px){
   .menu-wrap{
-    --u: clamp(1.9px, 0.78svh, 4.2px);
+    --u: clamp(1.5px, min(0.86svh, 0.55vw), 4.2px);
     grid-template-columns:auto auto;
     grid-template-rows:auto;
     align-content:center;
@@ -722,10 +803,14 @@ html[lang="en"] .menu-wrap .sub{
   .menu-wrap .menu-actions{
     max-width:min(calc(var(--u) * 96),100%);
     padding: calc(var(--u) * 4);
-    gap: calc(var(--u) * 2.4);
+    gap: calc(var(--u) * 2.6);
   }
   .menu-wrap .hero-stats{margin-bottom:calc(var(--u) * 2.4)}
   .menu-wrap .menu-row{gap: calc(var(--u) * 2.4)}
+  .menu-wrap .title-rule{
+    margin-block: calc(var(--u) * 3) calc(var(--u) * 2.4);
+  }
+  .menu-wrap .sub{margin-top: calc(var(--u) * 1.4)}
 }
 
 /* ============ SCREENS ============ */
@@ -1502,9 +1587,45 @@ body.rotated #stage{
    scaled down as a whole, which is the entire point.
    ========================================================= */
 body.rotated .menu-wrap{
-  --u: clamp(1.8px, 0.62vw, 4.2px);
+  /* the same budget as the upright menu, transposed: in a rotated
+     stage the viewport's WIDTH is the vertical axis and its
+     HEIGHT is the horizontal one */
+  --u: clamp(1.5px, min(0.52vw, 1.15vh), 4.2px);
 }
 body.rotated .lamp-rays{display:none}
+
+/* =========================================================
+   ROTATED PHONE — the media queries still describe the UPRIGHT
+   device, so `(orientation:landscape)` is false here even though
+   the stage inside is a wide box. That meant the rotated menu was
+   getting the stacked layout inside a ~390px-tall box: it fitted
+   by a whisker and every element sat at two-thirds scale.
+
+   The two-column composition halves the height requirement, so
+   the same screen now gets the full-size design — hero beside
+   the panel, 90u tall instead of 172u.
+   ========================================================= */
+@media (orientation:portrait) and (max-width:760px){
+  body.rotated .menu-wrap{
+    --u: clamp(1.5px, min(0.86vw, 0.55vh), 4.2px);
+    grid-template-columns:auto auto;
+    grid-template-rows:auto;
+    align-content:center;
+    align-items:center;
+    justify-content:center;
+    gap: calc(var(--u) * 8);
+    padding-block: calc(var(--u) * 7);
+    padding-inline: calc(var(--u) * 6);
+  }
+  body.rotated .menu-hero{gap:0}
+  body.rotated .menu-actions{
+    max-width:min(calc(var(--u) * 96),100%);
+    padding: calc(var(--u) * 4);
+    gap: calc(var(--u) * 2.6);
+  }
+  body.rotated .hero-stats{margin-bottom:calc(var(--u) * 2.4)}
+  body.rotated .menu-row{gap: calc(var(--u) * 2.4)}
+}
 
 /* the rotated stage is a landscape box, so the menu inside it is
    laid out by the same short-screen rules — this only softens the
